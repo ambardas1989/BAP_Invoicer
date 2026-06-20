@@ -2132,12 +2132,13 @@ async function sendEmail() {
       }
       window._resendInvoice  = null;
       window._resendPayments = null;
-    } else {
-      // Normal email mode — generate full invoice PDF
+    } else if (!emailPdfBase64) {
+      // Normal sponsor/vendor email mode — generate invoice PDF
       const pdfInfo = await buildPdfBase64(emailType);
       emailPdfBase64 = pdfInfo.base64;
       emailFileName  = pdfInfo.fileName;
     }
+    // else: donation mode — emailPdfBase64 already set in openDonEmailModal, skip generation
   } catch(e) {
     status.textContent = '⚠ PDF generation failed: ' + e.message;
     btn.disabled = false; btn.textContent = '✉ Send Email';
@@ -2160,17 +2161,21 @@ async function sendEmail() {
     const res  = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    // Log donation to sheet if this was a donation email (not logged yet — only logged on download)
+    // Log donation to sheet if this was a donation email
     const ft = window._emailFormType;
     if (ft === 'donation') {
       try {
-        const donData = getDonFormData();
-        await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({
+        // Read form data NOW before the delayed reset clears it
+        const donData   = getDonFormData();
+        const donInvNum = document.getElementById('don_invNumber').textContent;
+        const logRes  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({
           action: 'logDonation', token: currentToken,
           ...donData, pdfBase64: emailPdfBase64,
-          invoiceNumber: document.getElementById('don_invNumber').textContent
+          invoiceNumber: donInvNum
         })});
-      } catch(e) { /* log silently — email already sent */ }
+        const logData = await logRes.json();
+        if (logData.error) console.warn('Donation log failed:', logData.error);
+      } catch(e) { console.warn('Donation log error:', e.message); }
     }
     showToast('✓ Receipt emailed to ' + toRaw);
     setTimeout(() => {
@@ -2960,17 +2965,17 @@ async function loadReports() {
 
     document.getElementById('rp_loading').style.display = 'none';
 
-    const sponsors = data.sponsors || [];
-    const vendors  = data.vendors  || [];
-    const all      = [...sponsors, ...vendors];
+    const sponsors  = data.sponsors  || [];
+    const vendors   = data.vendors   || [];
+    const donations = data.donations || [];
+    const all       = [...sponsors, ...vendors];
 
-    if (all.length === 0) {
+    if (all.length === 0 && donations.length === 0) {
       document.getElementById('rp_empty').style.display = '';
       return;
     }
 
-    // Enrich with payment data (collected/outstanding/status already computed server-side)
-    // Fetch payments for all in parallel
+    // Enrich sponsors/vendors with payment data
     const payFetches = all.map(inv =>
       fetch(`${APPS_SCRIPT_URL}?action=getPayments&token=${encodeURIComponent(currentToken)}&invoiceNumber=${encodeURIComponent(inv.invoiceNumber)}`)
         .then(r=>r.json()).then(d=>d.payments||[]).catch(()=>[])
@@ -2983,9 +2988,16 @@ async function loadReports() {
       inv.status       = inv.outstanding<=0.001 ? 'PAID' : inv.collected>0 ? 'PARTIAL' : 'UNPAID';
     });
 
-    renderKPIs(all, sponsors, vendors);
-    renderCharts(sponsors, vendors);
-    renderTables(sponsors, vendors);
+    // Donations are fully paid at point of recording
+    donations.forEach(d => {
+      d.collected   = parseFloat(d.totalValue || d.finalDue || 0);
+      d.outstanding = 0;
+      d.status      = 'PAID';
+    });
+
+    renderKPIs([...all, ...donations], sponsors, vendors, donations);
+    renderCharts(sponsors, vendors, donations);
+    renderTables(sponsors, vendors, donations);
 
     document.getElementById('rp_kpis').style.display   = 'grid';
     document.getElementById('rp_charts').style.display = 'grid';
