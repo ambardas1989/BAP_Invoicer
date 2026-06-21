@@ -377,7 +377,7 @@
   <div class="card">
     <div class="card-title">Payment Summary</div>
     <div class="financials">
-      <div class="fin-row"><label>Package Amount ($)</label><input type="number" class="fin-input" id="sp_pkgAmt" value="5000" oninput="updateSpCalc()"></div>
+      <div class="fin-row"><label>Package / Total Commitment ($)</label><input type="number" class="fin-input" id="sp_pkgAmt" value="5000" oninput="updateSpCalc()"></div>
       <div class="fin-row"><label>Advance Paid ($)</label><input type="number" class="fin-input" id="sp_advancePaid" value="0" oninput="updateSpCalc();toggleAdvScreenshot('sp')"></div>
   <div id="sp_screenshotRow" style="display:none;margin-top:8px;">
     <div class="fin-row" style="align-items:center;gap:10px;flex-wrap:wrap;">
@@ -388,6 +388,35 @@
   </div>
       <div class="fin-row"><label>Discount ($)</label><input type="number" class="fin-input" id="sp_discount" value="0" oninput="updateSpCalc()"></div>
       <div class="fin-row total"><span>Final Payment Due</span><span id="sp_displayDue">$5,000.00</span></div>
+    </div>
+  </div>
+
+  <!-- Booth Allocation (optional) — dynamic multi-booth list -->
+  <div class="card" id="sp_boothCard">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <span>Booth Allocation <span style="font-size:12px;color:var(--text-muted);font-weight:400;">(optional)</span></span>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:400;">
+        <input type="checkbox" id="sp_hasBooth" onchange="toggleBoothAllocation()" style="width:16px;height:16px;cursor:pointer;">
+        Include booth with this sponsorship
+      </label>
+    </div>
+    <div id="sp_boothFields" style="display:none;margin-top:12px;">
+      <div id="sp_boothList"></div>
+      <button type="button" class="btn" onclick="addBooth()"
+        style="margin-top:8px;background:none;border:1.5px dashed var(--light-border);color:var(--saffron);font-size:13px;width:100%;padding:10px;">
+        + Add Booth
+      </button>
+      <div id="sp_boothError" style="display:none;color:var(--deep-red);font-size:12px;padding:8px 10px;background:#FFF0F0;border-radius:6px;margin-top:8px;"></div>
+      <div class="financials" style="margin-top:14px;">
+        <div class="fin-row">
+          <span style="color:var(--text-muted);font-size:13px;">Total Booth Allocation</span>
+          <span id="sp_displayBoothTotal">$0.00</span>
+        </div>
+        <div class="fin-row">
+          <span style="color:var(--text-muted);font-size:13px;">Sponsorship Portion</span>
+          <span id="sp_displaySponsTotal">$0.00</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -552,7 +581,9 @@
       <select id="rt_type">
         <option value="all">All Types</option>
         <option value="sponsor">Sponsorship Only</option>
-        <option value="vendor">Vendor Only</option>
+        <option value="vendor">Vendor / Direct Booths</option>
+        <option value="booth">All Booths (vendor + sponsor)</option>
+        <option value="donation">Donations</option>
       </select>
       <button class="btn btn-primary" onclick="doSearch()" style="white-space:nowrap;">🔍 Search</button>
       <button class="btn btn-secondary" onclick="doLoadAll()" style="white-space:nowrap;">📋 Load All</button>
@@ -595,6 +626,7 @@
         <div class="bb-item bb-outstanding"><label>Outstanding</label><span id="rt_bbOutstanding">—</span></div>
         <div><span id="rt_statusBadge" class="status-badge">—</span></div>
       </div>
+      <div id="rt_waterfallSplit" style="display:none;"></div>
     </div>
 
     <!-- Payment history -->
@@ -855,6 +887,13 @@
 
   <!-- Breakdown tables -->
   <div id="rp_tables" style="display:none;">
+    <!-- Booth Summary widget -->
+    <div class="card" id="rp_boothSummary" style="margin-bottom:16px;display:none;">
+      <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--saffron);margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--light-border);">
+        🏪 Booth Summary
+      </div>
+      <div id="rp_boothSummaryContent"></div>
+    </div>
     <!-- Sponsorship table -->
     <div class="card" style="margin-bottom:16px;">
       <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--saffron);padding:16px 20px;border-bottom:1px solid var(--light-border);">
@@ -1843,12 +1882,161 @@ function updateSpCustomDisplay(){
   document.getElementById('sp_pkgAmt').value=amt;
   updateSpCalc();
 }
+// ── Multi-booth management ────────────────────────────────────────────────────
+let _boothCounter = 0;
+
+const BOOTH_TYPES = [
+  '','Covered','Open','Indoor',
+  'Outdoor - Merch','Outdoor - Food','Food Truck','Custom'
+];
+const BOOTH_SIZES = ['','10x10','10x20','20x20','20x30','Food Truck Bay','Custom'];
+
+function boothTypeOptions(selected) {
+  return BOOTH_TYPES.map(t =>
+    `<option value="${t}" ${t===selected?'selected':''}>${t||'Select type'}</option>`
+  ).join('');
+}
+
+function boothSizeOptions(selected) {
+  return BOOTH_SIZES.map(s =>
+    `<option value="${s}" ${s===selected?'selected':''}>${s||'Select size'}</option>`
+  ).join('');
+}
+
+function addBooth(data) {
+  const idx  = _boothCounter++;
+  const d    = data || {};
+  const list = document.getElementById('sp_boothList');
+  const div  = document.createElement('div');
+  div.id     = `sp_booth_${idx}`;
+  div.style.cssText = 'background:var(--cream);border-radius:8px;padding:14px;margin-bottom:10px;position:relative;';
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <span style="font-size:12px;font-weight:600;color:var(--navy);">Booth ${list.children.length+1}</span>
+      <button type="button" onclick="removeBooth('sp_booth_${idx}')"
+        style="background:none;border:none;color:var(--deep-red);cursor:pointer;font-size:18px;line-height:1;padding:0;">×</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Booth Type</label>
+        <select id="sp_bt_${idx}" onchange="boothTypeChanged(${idx})">${boothTypeOptions(d.type||'')}</select>
+      </div>
+      <div class="form-group">
+        <label>Booth Size</label>
+        <select id="sp_bs_${idx}" onchange="boothSizeChanged(${idx})">${boothSizeOptions(d.size||'')}</select>
+        <input type="text" id="sp_bsc_${idx}" placeholder="Custom size"
+          style="margin-top:6px;display:${d.size==='Custom'?'block':'none'};"
+          value="${d.sizeCustom||''}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Tables</label>
+        <input type="number" id="sp_btables_${idx}" value="${d.tables||0}" min="0" oninput="updateSpCalc()">
+      </div>
+      <div class="form-group"><label>Chairs</label>
+        <input type="number" id="sp_bchairs_${idx}" value="${d.chairs||0}" min="0" oninput="updateSpCalc()">
+      </div>
+      <div class="form-group"><label>Parking Passes</label>
+        <input type="number" id="sp_bparking_${idx}" value="${d.parking||0}" min="0" oninput="updateSpCalc()">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Booth Amount ($) <span style="font-size:11px;color:var(--text-muted);">0 = complimentary</span></label>
+        <input type="number" id="sp_bamt_${idx}" value="${d.amount||0}" min="0" oninput="updateSpCalc()">
+      </div>
+    </div>`;
+  list.appendChild(div);
+  renumberBooths();
+  updateSpCalc();
+}
+
+function boothTypeChanged(idx) {
+  // No extra logic needed — Custom type uses free text size field
+  updateSpCalc();
+}
+
+function boothSizeChanged(idx) {
+  const val = document.getElementById(`sp_bs_${idx}`).value;
+  const customInput = document.getElementById(`sp_bsc_${idx}`);
+  if (customInput) customInput.style.display = val === 'Custom' ? 'block' : 'none';
+  updateSpCalc();
+}
+
+function removeBooth(divId) {
+  const el = document.getElementById(divId);
+  if (el) el.remove();
+  renumberBooths();
+  updateSpCalc();
+}
+
+function renumberBooths() {
+  const list = document.getElementById('sp_boothList');
+  if (!list) return;
+  Array.from(list.children).forEach((child, i) => {
+    const label = child.querySelector('span');
+    if (label) label.textContent = `Booth ${i+1}`;
+  });
+}
+
+function getBoothDetails() {
+  // Collect all booth data from dynamic list into array
+  const list = document.getElementById('sp_boothList');
+  if (!list) return [];
+  const booths = [];
+  Array.from(list.children).forEach(div => {
+    const id = div.id.replace('sp_booth_','');
+    const sizeEl = document.getElementById(`sp_bs_${id}`);
+    const sizeVal = sizeEl ? sizeEl.value : '';
+    const customSizeEl = document.getElementById(`sp_bsc_${id}`);
+    const size = sizeVal === 'Custom' && customSizeEl ? (customSizeEl.value||'Custom') : sizeVal;
+    booths.push({
+      type:    (document.getElementById(`sp_bt_${id}`)      || {value:''}).value,
+      size,
+      tables:  parseInt((document.getElementById(`sp_btables_${id}`)  || {value:0}).value)||0,
+      chairs:  parseInt((document.getElementById(`sp_bchairs_${id}`)  || {value:0}).value)||0,
+      parking: parseInt((document.getElementById(`sp_bparking_${id}`) || {value:0}).value)||0,
+      amount:  parseFloat((document.getElementById(`sp_bamt_${id}`)   || {value:0}).value)||0,
+    });
+  });
+  return booths;
+}
+
 function updateSpCalc(){
-  const amt=parseFloat(document.getElementById('sp_pkgAmt').value)||0;
-  const adv=parseFloat(document.getElementById('sp_advancePaid').value)||0;
-  const disc=parseFloat(document.getElementById('sp_discount').value)||0;
-  const invoiced=Math.max(0,amt-disc);
-  document.getElementById('sp_displayDue').textContent=fmt(Math.max(0,invoiced-adv));
+  const pkg      = parseFloat(document.getElementById('sp_pkgAmt').value)||0;
+  const adv      = parseFloat(document.getElementById('sp_advancePaid').value)||0;
+  const disc     = parseFloat(document.getElementById('sp_discount').value)||0;
+  const hasBooth = document.getElementById('sp_hasBooth').checked;
+  const booths   = hasBooth ? getBoothDetails() : [];
+  const boothAmt = booths.reduce((s,b) => s + (b.amount||0), 0);
+  // Package IS the total commitment — booth is carved out, not added
+  const sponsAmt = Math.max(0, pkg - boothAmt);
+  const invoiced = Math.max(0, pkg - disc);
+  document.getElementById('sp_displayDue').textContent = fmt(Math.max(0, invoiced - adv));
+  const boothTotalEl  = document.getElementById('sp_displayBoothTotal');
+  const sponsPortionEl= document.getElementById('sp_displaySponsTotal');
+  const errorEl       = document.getElementById('sp_boothError');
+  if (boothTotalEl)   boothTotalEl.textContent = fmt(boothAmt);
+  if (sponsPortionEl) sponsPortionEl.textContent = fmt(sponsAmt);
+  // Validation: booth total cannot exceed package amount
+  if (errorEl) {
+    if (hasBooth && boothAmt > pkg) {
+      errorEl.textContent = `Booth total (${fmt(boothAmt)}) exceeds package amount (${fmt(pkg)}). Please reduce booth amounts.`;
+      errorEl.style.display = '';
+    } else {
+      errorEl.style.display = 'none';
+    }
+  }
+}
+
+function toggleBoothAllocation() {
+  const hasBooth = document.getElementById('sp_hasBooth').checked;
+  const fields   = document.getElementById('sp_boothFields');
+  fields.style.display = hasBooth ? '' : 'none';
+  if (hasBooth && document.getElementById('sp_boothList').children.length === 0) {
+    addBooth(); // auto-add first booth when toggled on
+  }
+  updateSpCalc();
 }
 function getSpPkgName(){
   if(selectedSpPkg==='CUSTOM_SP'){const n=document.getElementById('sp_customName').value.trim();return n?n.toUpperCase()+' SPONSORSHIP':'CUSTOM SPONSORSHIP';}
@@ -1966,7 +2154,27 @@ function showToast(msg,color){const t=document.getElementById('toast');t.textCon
 // PREVIEW
 // ================================================================
 function showPreview(type){
-  document.getElementById('invoiceContent').innerHTML=type==='sponsor'?buildSpHTML():buildVnHTML();
+  const isV = type === 'vendor';
+  // Run same validation as generatePDF — no preview of incomplete invoices
+  const billToVal  = document.getElementById(isV?'vn_billTo':'sp_billTo').value.trim();
+  const emailVal   = document.getElementById(isV?'vn_contactEmail':'sp_contactEmail').value.trim();
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal);
+  const amt        = parseFloat(document.getElementById(isV?'vn_boothAmt':'sp_pkgAmt').value)||0;
+  const errors = [];
+  if (!billToVal)              errors.push((isV?'Vendor':'Sponsor')+' name is required');
+  if (!emailVal)               errors.push('Contact email is required');
+  else if (!emailValid)        errors.push('Contact email is not valid');
+  if (amt <= 0)                errors.push('Amount must be greater than $0');
+  if (!isV) {
+    const boothErrEl = document.getElementById('sp_boothError');
+    if (boothErrEl && boothErrEl.style.display !== 'none' && boothErrEl.textContent)
+      errors.push('Booth total exceeds package amount');
+  }
+  if (errors.length > 0) {
+    showToast('⚠ ' + errors[0], '#B5281C');
+    return;
+  }
+  document.getElementById('invoiceContent').innerHTML = isV ? buildVnHTML() : buildSpHTML();
   document.getElementById('previewModal').classList.add('open');
 }
 function closePreview(){document.getElementById('previewModal').classList.remove('open');}
@@ -2022,11 +2230,30 @@ function buildSpHTML(){
   const amt=parseFloat(document.getElementById('sp_pkgAmt').value)||0;
   const adv=parseFloat(document.getElementById('sp_advancePaid').value)||0;
   const disc=parseFloat(document.getElementById('sp_discount').value)||0;
-  const invoiced=Math.max(0,amt-disc); const due=Math.max(0,invoiced-adv);
-  const benefits=getActiveBenefitsText(); // works for custom too now
-  const notes=document.getElementById('sp_notes').value;
-  const spDescLine=[sponsorType,spEventName,period].filter(Boolean).join(' · ');
-  return`<div style="margin-bottom:6px;"><span class="inv-type-badge badge-sponsor">Sponsorship Invoice</span></div>${invHeader(num,date,taxId,dueDate)}<div class="inv-bill-to"><div class="label">Bill To</div><div class="value">${billTo}</div></div><table class="inv-table"><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody><tr><td><strong>${getSpPkgName()}</strong><div class="pkg-detail">${spDescLine}</div>${benefitsTable(benefits)}</td><td>${fmt(amt)}</td></tr>${notes?`<tr><td colspan="2" style="padding:8px 0 0;"><div style="background:#FFF8EE;border-left:3px solid #E8732A;border-radius:0 4px 4px 0;padding:8px 10px;"><div style="font-size:10px;font-weight:600;color:#E8732A;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Additional Notes / Custom Offerings</div><div style="font-size:12px;color:#1A2B4A;text-align:left;">${escHtml(notes)}</div></div></td></tr>`:''}</tbody></table>${totalsBlock(amt,adv,disc,due,'Package Total')}${payBlock(num)}${footerBlock()}`;
+  const hasBooth   = document.getElementById('sp_hasBooth').checked;
+  const booths     = hasBooth ? getBoothDetails() : [];
+  const boothAmt   = booths.reduce((s,b)=>s+(b.amount||0),0);
+  // Package IS total — no additive total
+  const totalAmt   = amt; // amt = pkg = total commitment
+  const sponsAmt   = Math.max(0, amt - boothAmt);
+  const invoiced   = Math.max(0,totalAmt-disc); const due=Math.max(0,invoiced-adv);
+  const benefits   = getActiveBenefitsText();
+  const notes      = document.getElementById('sp_notes').value;
+  const spDescLine = [sponsorType,spEventName,period].filter(Boolean).join(' · ');
+  // One PDF row per booth
+  const boothRows  = booths.map((b,i) => {
+    const detStr = [b.type, b.size,
+      b.tables  ? `${b.tables} table(s)`   : '',
+      b.chairs  ? `${b.chairs} chair(s)`   : '',
+      b.parking ? `${b.parking} parking pass(es)` : ''
+    ].filter(Boolean).join(' · ');
+    return `<tr><td><strong>Booth ${booths.length>1?i+1+' ':''}Allocation</strong>${detStr?`<div class="pkg-detail">${escHtml(detStr)}</div>`:''}</td><td>${b.amount===0?'<em style="color:#888;">Complimentary</em>':fmt(b.amount)}</td></tr>`;
+  }).join('');
+  // Show breakdown when booth included: sponsorship portion + booth + total
+  const splitRows = hasBooth && booths.length > 0 ? `
+    <tr style="background:#F5F5F5;"><td style="color:#666;padding-left:12px;">Sponsorship Portion</td><td style="color:#666;">${fmt(sponsAmt)}</td></tr>
+    <tr style="background:#F0F0F0;font-weight:600;"><td>Total Commitment</td><td>${fmt(totalAmt)}</td></tr>` : '';
+  return`<div style="margin-bottom:6px;"><span class="inv-type-badge badge-sponsor">Sponsorship Invoice</span></div>${invHeader(num,date,taxId,dueDate)}<div class="inv-bill-to"><div class="label">Bill To</div><div class="value">${billTo}</div></div><table class="inv-table"><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody><tr><td><strong>${getSpPkgName()}</strong><div class="pkg-detail">${spDescLine}</div>${benefitsTable(benefits)}</td><td>${hasBooth&&booths.length>0?fmt(sponsAmt):fmt(amt)}</td></tr>${boothRows}${splitRows}${notes?`<tr><td colspan="2" style="padding:8px 0 0;"><div style="background:#FFF8EE;border-left:3px solid #E8732A;border-radius:0 4px 4px 0;padding:8px 10px;"><div style="font-size:10px;font-weight:600;color:#E8732A;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Additional Notes / Custom Offerings</div><div style="font-size:12px;color:#1A2B4A;text-align:left;">${escHtml(notes)}</div></div></td></tr>`:''}</tbody></table>${totalsBlock(totalAmt,adv,disc,due,'Total Commitment')}${payBlock(num)}${footerBlock()}`;
 }
 
 function buildVnHTML(){
@@ -2179,6 +2406,13 @@ async function _generatePDF(type){
   else if (!emailValid) validationErrors.push('Contact email is not valid');
   if (isV && !selectedBoothId) validationErrors.push('Please select a booth type');
   if (amt <= 0)   validationErrors.push('Package/booth amount must be greater than $0');
+  // Booth allocation error — booth total exceeds package
+  if (!isV) {
+    const boothErrEl = document.getElementById('sp_boothError');
+    if (boothErrEl && boothErrEl.style.display !== 'none' && boothErrEl.textContent) {
+      validationErrors.push('Booth total exceeds package amount — please fix booth amounts');
+    }
+  }
 
   if (validationErrors.length > 0) {
     showToast('⚠ ' + validationErrors[0], '#B5281C');
@@ -2389,7 +2623,13 @@ async function _generatePDF(type){
     notes,
     bapPoc:          document.getElementById('sp_bapPoc').value,
     fiscalYear:      getFiscalYear(document.getElementById('sp_startDate').value||null),
-    pdfBase64
+    pdfBase64,
+    // Booth allocation — array of booth objects
+    // Package IS total commitment; booth is carved out; sponsorship = pkg - booth
+    hasBooth:        document.getElementById('sp_hasBooth').checked,
+    boothDetails:    getBoothDetails(),
+    boothAmount:     getBoothDetails().reduce((s,b)=>s+(b.amount||0),0),
+    // sponsAmount explicitly passed for waterfall — server derives from packageAmount - boothAmount
   };
 
   // Upload advance screenshot BEFORE logging so link goes in with the invoice row
@@ -2447,6 +2687,11 @@ function resetForm(type){
     ['sp_billTo','sp_contactName','sp_contactEmail','sp_notes'].forEach(id=>document.getElementById(id).value='');
     document.getElementById('sp_advancePaid').value='0';
     document.getElementById('sp_discount').value='0';
+    // Reset booth allocation
+    document.getElementById('sp_hasBooth').checked          = false;
+    document.getElementById('sp_boothFields').style.display = 'none';
+    document.getElementById('sp_boothList').innerHTML        = '';
+    _boothCounter = 0;
     document.getElementById('sp_invDate').valueAsDate=new Date();
     const d=new Date();d.setDate(d.getDate()+30);document.getElementById('sp_dueDate').valueAsDate=d;
     const now=new Date();
@@ -2749,12 +2994,18 @@ async function doSearch(loadAll=false) {
   closeDetail();
 
   try {
+    // 'booth' type = fetch both vendor AND all sponsors, then filter client-side
+    const serverType = type === 'booth' ? 'all' : type;
     const sessionParam = currentSession ? `&session=${encodeURIComponent(currentSession.sessionToken)}` : `&token=${encodeURIComponent(currentToken)}`;
-    const url = `${APPS_SCRIPT_URL}?action=search${sessionParam}&q=${encodeURIComponent(q)}&type=${type}&loadAll=${loadAll?'1':'0'}`;
+    const url = `${APPS_SCRIPT_URL}?action=search${sessionParam}&q=${encodeURIComponent(q)}&type=${serverType}&loadAll=${loadAll?'1':'0'}`;
     const res = await fetch(url);
     const data = await res.json();
     if (data.error) { document.getElementById('rt_searchStatus').textContent='⚠ '+data.error; return; }
     rtResults = data.results || [];
+    // Client-side filter for booth type
+    if (type === 'booth') {
+      rtResults = rtResults.filter(r => r.type === 'vendor' || (r.type === 'sponsor' && r.hasBooth));
+    }
     renderResults(rtResults, q);
   } catch(e) {
     document.getElementById('rt_searchStatus').textContent = '⚠ Search failed';
@@ -2897,14 +3148,15 @@ function refreshCards() {
 // DETAIL VIEW
 // ================================================================
 function getInvoicedAmount(inv) {
-  // invoicedAmount = packageAmount - discount (true invoice total before advance)
-  const pkg  = parseFloat(inv['Package Amount']||inv['Booth Amount']||inv.packageAmount||0);
-  const disc = parseFloat(inv['Discount']||inv.discount||0);
-  const ia   = parseFloat(inv.invoicedAmount||0);
-  // Use pre-computed if available, else derive
-  if (ia > 0) return ia;
-  if (pkg > 0) return Math.max(0, pkg - disc);
-  // Last resort: finalDue + advance (reconstruct)
+  // Package = total commitment for all invoice types
+  // Booth is carved out of package — does NOT add to total
+  const pkg   = parseFloat(inv['Package Amount']||inv.packageAmount||0);
+  const disc  = parseFloat(inv['Discount']||inv.discount||0);
+  const total = parseFloat(inv['Total Commitment']||inv.totalCommitment||0);
+  // Total Commitment stored = packageAmount (they are equal now)
+  if (total > 0) return Math.max(0, total - disc);
+  if (pkg > 0)   return Math.max(0, pkg - disc);
+  // Fallback: finalDue + advance
   return Math.max(0, (parseFloat(inv.finalDue||0)) + (parseFloat(inv['Advance Paid']||inv.advancePaid||0)));
 }
 
@@ -2954,6 +3206,24 @@ async function openDetail(idx) {
     ['Email',        inv['Contact Email']||inv.contactEmail],
     ['Package',      inv['Package']||inv.packageName],
     ['Package Amt',  fmt(inv.packageAmount||0)],
+    ...(inv.hasBooth && inv.boothDetails && inv.boothDetails.length > 0 ? [
+      ['Booths', `${inv.boothDetails.length} booth(s) — ${fmt(inv.boothAmount||0)} total`],
+      ...inv.boothDetails.map((b,i) => [
+        `Booth ${inv.boothDetails.length>1?i+1:''}`.trim(),
+        [b.type, b.size,
+          b.tables  ? `${b.tables}T` : '',
+          b.chairs  ? `${b.chairs}C` : '',
+          b.parking ? `${b.parking}P` : '',
+          b.amount===0 ? 'Complimentary' : fmt(b.amount)
+        ].filter(Boolean).join(' · ')
+      ]),
+      ['Sponsorship Portion', fmt(Math.max(0, (inv.totalCommitment||getInvoicedAmount(inv)) - (inv.boothAmount||0)))],
+      ['Total Commitment',    fmt(inv.totalCommitment||getInvoicedAmount(inv))],
+    ] : inv.hasBooth ? [
+      ['Booth Allocation',    fmt(inv.boothAmount||0)],
+      ['Sponsorship Portion', fmt(Math.max(0, getInvoicedAmount(inv) - (inv.boothAmount||0)))],
+      ['Total Commitment',    fmt(inv.totalCommitment||getInvoicedAmount(inv))],
+    ] : []),
     ['Invoice Total',fmt(getInvoicedAmount(inv))],
     ...(parseFloat(inv['Advance Paid']||inv.advancePaid||0)>0?[['Advance Paid', fmt(parseFloat(inv['Advance Paid']||inv.advancePaid))]]:[]),
     ...(parseFloat(inv['Discount']||inv.discount||0)>0?[['Discount', fmt(parseFloat(inv['Discount']||inv.discount))]]:[]),
@@ -3034,7 +3304,7 @@ async function loadPayments(invoiceNumber, invoiceTotal) {
 function renderPayments(payments, invoiceTotal) {
   const totalPaid = payments.reduce((s,p)=>s+(p.amount||0), 0);
   const outstanding = Math.max(0, invoiceTotal - totalPaid);
-  updateBalanceBar(invoiceTotal, totalPaid);
+  updateBalanceBar(invoiceTotal, totalPaid, payments);
 
   if (payments.length === 0) {
     document.getElementById('rt_paymentHistory').innerHTML =
@@ -3046,10 +3316,17 @@ function renderPayments(payments, invoiceTotal) {
       const tagLabel = p.tag ? (p.tag.endsWith('-F')
         ? '<span class="status-badge status-paid" style="font-size:10px;padding:1px 6px;">FULL</span>'
         : `<span class="status-badge status-partial" style="font-size:10px;padding:1px 6px;">PART</span>`) : '';
+      // Waterfall split row (sponsor+booth invoices only)
+      const wfLine = p.sponsApplied !== null
+        ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+            → Sponsorship: ${fmt(p.sponsApplied||0)}
+            ${(p.boothApplied||0)>0 ? ` · Booth: ${fmt(p.boothApplied)}` : ''}
+           </div>` : '';
       return `<div class="payment-row">
         <div>
           <div style="font-weight:600;font-size:13px;">${p.method||'—'}${ref} ${tagLabel}</div>
           <div class="pr-meta">${d}${p.notes?' · '+p.notes:''}</div>
+          ${wfLine}
         </div>
         <div class="pr-amount">+ ${fmt(p.amount||0)}</div>
       </div>`;
@@ -3072,7 +3349,7 @@ function renderPayments(payments, invoiceTotal) {
   }
 }
 
-function updateBalanceBar(total, paid) {
+function updateBalanceBar(total, paid, payments) {
   const outstanding = Math.max(0, total - paid);
   document.getElementById('rt_bbTotal').textContent = fmt(total);
   document.getElementById('rt_bbPaid').textContent  = fmt(paid);
@@ -3084,6 +3361,30 @@ function updateBalanceBar(total, paid) {
     badge.textContent='PARTIAL'; badge.className='status-badge status-partial';
   } else {
     badge.textContent='UNPAID'; badge.className='status-badge status-unpaid';
+  }
+  // Show waterfall split for sponsor+booth invoices
+  const inv = rtCurrentInvoice;
+  const splitEl = document.getElementById('rt_waterfallSplit');
+  if (splitEl && inv && inv.type === 'sponsor' && inv.hasBooth && payments && payments.length > 0) {
+    const lastPmt = payments[payments.length - 1];
+    if (lastPmt.sponsTotal !== null && lastPmt.sponsTotal !== undefined) {
+      const sponsOut = Math.max(0, (inv.packageAmount||0) - (inv.boothAmount||0) - (lastPmt.sponsTotal||0));
+      const boothOut = Math.max(0, (inv.boothAmount||0) - (lastPmt.boothTotal||0));
+      splitEl.style.display = '';
+      splitEl.innerHTML = `
+        <div style="font-size:12px;color:var(--text-muted);margin-top:8px;padding:8px 10px;background:var(--cream);border-radius:6px;">
+          <strong>Payment split:</strong>
+          Sponsorship paid ${fmt(lastPmt.sponsTotal||0)} of ${fmt(Math.max(0,(inv.packageAmount||0)-(inv.boothAmount||0)))}
+          ${sponsOut<=0 ? '<span style="color:var(--success);">✓</span>' : `· ${fmt(sponsOut)} remaining`}
+          &nbsp;|&nbsp;
+          Booth paid ${fmt(lastPmt.boothTotal||0)} of ${fmt(inv.boothAmount||0)}
+          ${boothOut<=0 ? '<span style="color:var(--success);">✓</span>' : `· ${fmt(boothOut)} remaining`}
+        </div>`;
+    } else {
+      splitEl.style.display = 'none';
+    }
+  } else if (splitEl) {
+    splitEl.style.display = 'none';
   }
 }
 
@@ -3136,6 +3437,13 @@ async function submitPayment(withReceipt) {
       }
     }
 
+    // For sponsor+booth invoices, pass split amounts for waterfall allocation
+    // boothAmount = total of all booths (sum already stored on invoice)
+    // Waterfall: package = total, booth carved out, sponsorship = total - booth
+    const invBoothAmt = (inv.type === 'sponsor' && inv.hasBooth) ? (inv.boothAmount||0) : 0;
+    const invSponsAmt = (inv.type === 'sponsor' && inv.hasBooth)
+      ? Math.max(0, getInvoicedAmount(inv) - invBoothAmt)
+      : getInvoicedAmount(inv);
     const body = {
       action:         'addPayment',
       token:          currentToken,
@@ -3144,6 +3452,8 @@ async function submitPayment(withReceipt) {
       billTo:         inv.billTo,
       amount:         amt,
       invoiceTotal:   getInvoicedAmount(inv),
+      sponsAmount:    invSponsAmt,
+      boothAmount:    invBoothAmt,
       fiscalYear:     inv['Fiscal Year']||inv.fiscalYear||'',
       method:         document.getElementById('rt_payMethod').value,
       reference:      document.getElementById('rt_payRef').value,
@@ -3539,10 +3849,17 @@ async function loadReports() {
     );
     const allPayments = await Promise.all(payFetches);
     all.forEach((inv,i) => {
-      const pmts = allPayments[i];
+      const pmts       = allPayments[i];
+      const invTotal   = getInvoicedAmount(inv);
       inv.collected    = pmts.reduce((s,p)=>s+(p.amount||0), 0);
-      inv.outstanding  = Math.max(0, inv.finalDue - inv.collected);
+      inv.outstanding  = Math.max(0, invTotal - inv.collected);
       inv.status       = inv.outstanding<=0.001 ? 'PAID' : inv.collected>0 ? 'PARTIAL' : 'UNPAID';
+      // Waterfall split totals for sponsor+booth invoices
+      if (inv.type === 'sponsor' && inv.hasBooth && pmts.length > 0) {
+        const lastPmt  = pmts[pmts.length - 1];
+        inv.sponsCollected = lastPmt.sponsTotal !== null ? lastPmt.sponsTotal : null;
+        inv.boothCollected = lastPmt.boothTotal !== null ? lastPmt.boothTotal : null;
+      }
     });
 
     // Donations are fully paid at point of recording
@@ -3639,7 +3956,53 @@ function renderCharts(sponsors, vendors, donations) {
 
 function renderTables(sponsors, vendors, donations) {
   donations = donations || [];
-  // Sponsor table
+
+  // ── Booth summary ────────────────────────────────────────────────────────
+  const sponsWithBooth  = sponsors.filter(s => s.hasBooth);
+  const directVendors   = vendors.length;
+  // Count total booths — each sponsor may have multiple booths in boothDetails array
+  const sponsBoothCount = sponsWithBooth.reduce((sum,s) => {
+    const cnt = (s.boothDetails && s.boothDetails.length) ? s.boothDetails.length : (s.boothCount||1);
+    return sum + cnt;
+  }, 0);
+  const totalBooths   = directVendors + sponsBoothCount;
+  // Complimentary = sponsor booths where all booths have amount 0
+  const complimentary = sponsWithBooth.filter(s => {
+    if (s.boothDetails && s.boothDetails.length) return s.boothDetails.every(b => (b.amount||0)===0);
+    return (s.boothAmount||0) === 0;
+  }).length;
+  const boothRevFromSpons = sponsWithBooth.reduce((sum,s) => sum + (s.boothAmount||0), 0);
+  const boothRevFromVendors = vendors.reduce((sum,v) => sum + (v.finalDue||0), 0);
+  const boothSummaryEl = document.getElementById('rp_boothSummary');
+  const boothContentEl = document.getElementById('rp_boothSummaryContent');
+  if (totalBooths > 0 && boothSummaryEl && boothContentEl) {
+    boothSummaryEl.style.display = '';
+    boothContentEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px;">
+        <div style="background:var(--cream);border-radius:8px;padding:12px 14px;">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Direct bookings</div>
+          <div style="font-size:22px;font-weight:600;">${directVendors}</div>
+        </div>
+        <div style="background:var(--cream);border-radius:8px;padding:12px 14px;">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Sponsor commitments</div>
+          <div style="font-size:22px;font-weight:600;">${sponsBoothCount}</div>
+          ${sponsWithBooth.length !== sponsBoothCount ? `<div style="font-size:11px;color:var(--text-muted);">${sponsWithBooth.length} sponsor(s)</div>` : ''}
+        </div>
+        <div style="background:#1A2B4A;border-radius:8px;padding:12px 14px;">
+          <div style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:4px;">Total booths</div>
+          <div style="font-size:22px;font-weight:600;color:#fff;">${totalBooths}</div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);padding-top:10px;border-top:1px solid var(--light-border);">
+        Booth revenue: ${fmt(boothRevFromVendors)} from direct · ${fmt(boothRevFromSpons)} from sponsor allocations
+        ${complimentary > 0 ? ` · ${complimentary} complimentary` : ''}
+        &nbsp;|&nbsp; <strong>Total: ${fmt(boothRevFromVendors + boothRevFromSpons)}</strong>
+      </div>`;
+  } else if (boothSummaryEl) {
+    boothSummaryEl.style.display = 'none';
+  }
+
+  // ── Sponsor table ────────────────────────────────────────────────────────
   document.getElementById('rp_spCount').textContent = `(${sponsors.length} invoice${sponsors.length===1?'':'s'})`;
   document.getElementById('rp_spBody').innerHTML = sponsors.length === 0
     ? '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-muted);">No sponsorship invoices</td></tr>'
@@ -3667,9 +4030,17 @@ function renderTables(sponsors, vendors, donations) {
 
 function rpTableRow(r, col3) {
   const statusCls = r.status==='PAID' ? 'status-paid' : r.status==='PARTIAL' ? 'status-partial' : 'status-unpaid';
+  const hasSplit  = r.type==='sponsor' && r.hasBooth && (r.boothAmount||0) > 0;
+  const sponsPortion = hasSplit ? Math.max(0, (r.finalDue||0) - (r.boothAmount||0)) : null;
+  const boothBadge = (r.type==='sponsor' && r.hasBooth)
+    ? `<span style="font-size:10px;background:#E8F0FE;color:#2A5BC8;border-radius:4px;padding:1px 6px;margin-left:6px;">+Booth ${r.boothAmount===0?'(free)':fmt(r.boothAmount)}</span>`
+    : '';
+  const splitDetail = hasSplit
+    ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Spons ${fmt(sponsPortion)} · Booth ${fmt(r.boothAmount)}</div>`
+    : '';
   return `<tr style="border-bottom:1px solid var(--light-border);">
     <td style="padding:10px 16px;font-size:12px;font-weight:600;color:#2A5BC8;">${r.invoiceNumber||'—'}</td>
-    <td style="padding:10px 16px;">${r.billTo||'—'}</td>
+    <td style="padding:10px 16px;">${r.billTo||'—'}${boothBadge}${splitDetail}</td>
     <td style="padding:10px 16px;color:var(--text-muted);">${col3}</td>
     <td style="padding:10px 16px;text-align:right;font-weight:600;">${fmt(r.finalDue||0)}</td>
     <td style="padding:10px 16px;text-align:right;color:var(--success);font-weight:600;">${fmt(r.collected||0)}</td>
