@@ -3495,6 +3495,7 @@ async function submitPayment(withReceipt) {
     // boothAmount = total of all booths (sum already stored on invoice)
     // Waterfall: package = total, booth carved out, sponsorship = total - booth
     const invBoothAmt = (inv.type === 'sponsor' && inv.hasBooth) ? (inv.boothAmount||0) : 0;
+    const invTotal    = inv.invoiced || inv.invoicedAmount || 0;
     const invSponsAmt = (inv.type === 'sponsor' && inv.hasBooth)
       ? Math.max(0, invTotal - invBoothAmt)
       : invTotal;
