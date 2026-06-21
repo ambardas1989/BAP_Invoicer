@@ -282,6 +282,15 @@
   <button class="sb-link" onclick="showTokenModal(true)">Switch user</button>
 </div>
 
+<!-- Persistent error banner — shown when data fetch fails -->
+<div id="errorBanner" style="display:none;background:#B5281C;color:#fff;padding:10px clamp(12px,4vw,40px);font-size:13px;display:none;align-items:center;justify-content:space-between;gap:12px;">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span style="font-size:16px;">⚠</span>
+    <span id="errorBannerMsg">Unable to load data from server.</span>
+  </div>
+  <button onclick="dismissErrorBanner()" style="background:rgba(255,255,255,0.2);border:none;color:#fff;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;font-family:inherit;">Dismiss</button>
+</div>
+
 <div style="text-align:center;">
   <div class="type-toggle">
     <button class="toggle-btn active" onclick="switchType('sponsor')">🎗 Sponsorship</button>
@@ -1054,6 +1063,52 @@ function showDefaultCcRow(prefix) {
   const row  = document.getElementById(prefix + '_defaultCcRow');
   const disp = document.getElementById(prefix + '_defaultCcDisplay');
   if (row && disp) { row.style.display = cc ? '' : 'none'; if (cc) disp.textContent = cc; }
+}
+
+// ── Error banner — persistent, shown when data fetch fails ──────────────────
+function showErrorBanner(msg) {
+  const b = document.getElementById('errorBanner');
+  const m = document.getElementById('errorBannerMsg');
+  if (b && m) { m.textContent = msg; b.style.display = 'flex'; }
+}
+function dismissErrorBanner() {
+  const b = document.getElementById('errorBanner');
+  if (b) b.style.display = 'none';
+}
+
+// ── Save error modal — shown when a save/log operation fails ─────────────────
+function showSaveError(msg, detail) {
+  const existing = document.getElementById('saveErrorModal');
+  if (existing) existing.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'saveErrorModal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:28px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+        <span style="font-size:28px;">⚠️</span>
+        <div>
+          <div style="font-weight:700;font-size:16px;color:#B5281C;">Save Failed</div>
+          <div style="font-size:13px;color:#666;margin-top:2px;">${escHtml(msg)}</div>
+        </div>
+      </div>
+      ${detail ? `<div style="background:#FFF3F3;border-radius:8px;padding:10px 14px;font-size:12px;color:#B5281C;margin-bottom:16px;font-family:monospace;">${escHtml(detail)}</div>` : ''}
+      <div style="background:#FFF8E1;border-radius:8px;padding:10px 14px;font-size:13px;color:#7A5800;margin-bottom:20px;">
+        <strong>Action required:</strong> Your PDF was generated but may not have been saved to the sheet or Drive. 
+        Please note the invoice number and check your Google Sheet manually.
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button onclick="document.getElementById('saveErrorModal').remove()" 
+          style="padding:9px 20px;border-radius:8px;border:1.5px solid #ddd;background:#fff;cursor:pointer;font-family:inherit;font-size:13px;">
+          Dismiss
+        </button>
+        <button onclick="document.getElementById('saveErrorModal').remove()" 
+          style="padding:9px 20px;border-radius:8px;border:none;background:#B5281C;color:#fff;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;">
+          I'll check manually
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
 }
 
 // Updates token modal UI after server confirms MFA is required
@@ -2357,9 +2412,17 @@ async function _generatePDF(type){
   const logResult = await logInvoice(type, num, logPayload);
   const {logged, driveLink} = logResult;
 
+  // Show save error modal if logging failed — PDF still downloaded but user must check sheet
+  if (!logged && hasBackend()) {
+    showSaveError(
+      `Invoice ${num} could not be saved to the sheet.`,
+      'The PDF has been generated. Please check your Google Sheet and add the record manually if missing.'
+    );
+  }
+
   if (emailState.formType) {
     // Email mode — just store toast message for caller, no download, no button lock
-    emailState.logNote = logged ? (driveLink ? ' · Saved to Drive ✓' : ' · Logged ✓') : '';
+    emailState.logNote = logged ? (driveLink ? ' · Saved to Drive ✓' : ' · Logged ✓') : '⚠ Not saved to sheet';
   } else {
     // Download mode — trigger browser download and lock button
     doc.save(`BAP_Invoice_${num}.pdf`);
@@ -2550,7 +2613,8 @@ async function sendEmail() {
       let payments = emailState.resendPayments || inv._payments || null;
       if (!payments) {
         try {
-          const url = `${APPS_SCRIPT_URL}?action=getPayments&token=${encodeURIComponent(currentToken)}&invoiceNumber=${encodeURIComponent(inv.invoiceNumber)}`;
+          const _pp = currentSession ? `session=${encodeURIComponent(currentSession.sessionToken)}` : `token=${encodeURIComponent(currentToken)}`;
+          const url = `${APPS_SCRIPT_URL}?action=getPayments&${_pp}&invoiceNumber=${encodeURIComponent(inv.invoiceNumber)}`;
           const pr  = await fetch(url);
           const pd  = await pr.json();
           payments  = pd.payments || [];
@@ -2633,6 +2697,7 @@ async function sendEmail() {
   } catch(e) {
     status.textContent = '⚠ ' + e.message;
     btn.disabled = false; btn.textContent = '✉ Send Email';
+    showSaveError('Email could not be sent: ' + e.message, 'Please try again or send manually.');
   }
 }
 
@@ -2692,7 +2757,8 @@ async function doSearch(loadAll=false) {
     rtResults = data.results || [];
     renderResults(rtResults, q);
   } catch(e) {
-    document.getElementById('rt_searchStatus').textContent = '⚠ Search failed — check connection';
+    document.getElementById('rt_searchStatus').textContent = '⚠ Search failed';
+    showErrorBanner('Could not load invoices from server: ' + e.message);
   }
 }
 
@@ -2710,6 +2776,7 @@ async function renderResults(results, q) {
     return;
   }
 
+  dismissErrorBanner();
   status.textContent = results.length + ' invoice' + (results.length===1?'':'s') + ' found';
 
   // Show summary immediately with invoice totals
@@ -2764,6 +2831,7 @@ async function renderResults(results, q) {
           const pEl=document.getElementById(`card-paid-${i}`); if(pEl) pEl.innerHTML='—';
           const bEl=document.getElementById(`card-bal-${i}`);  if(bEl) bEl.innerHTML='—';
           if(done===n){document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);}
+          showErrorBanner('Could not load payment data — balances may be incomplete. Check your connection and refresh.');
         });
     });
   } else {
@@ -3134,6 +3202,10 @@ async function submitPayment(withReceipt) {
 
   } catch(e) {
     payStatus.textContent = '⚠ Failed: ' + e.message;
+    showSaveError(
+      'Payment could not be recorded: ' + e.message,
+      'Please check your Google Sheet and add the payment manually if needed.'
+    );
   } finally {
     payBtn.disabled  = false;
     rcptBtn.disabled = false;
@@ -3414,7 +3486,7 @@ let rpReportData = null;
 
 async function loadReports() {
   if (!hasBackend()) return;
-  if (!currentToken) return;
+  if (!currentSession && !currentToken) return;
   // Show archive button for admins
   const archBtn = document.getElementById('rp_archiveBtn');
   if (archBtn) archBtn.style.display = currentIsAdmin ? '' : 'none';
@@ -3460,8 +3532,9 @@ async function loadReports() {
     }
 
     // Enrich sponsors/vendors with payment data
+    const _rptParam = currentSession ? `session=${encodeURIComponent(currentSession.sessionToken)}` : `token=${encodeURIComponent(currentToken)}`;
     const payFetches = all.map(inv =>
-      fetch(`${APPS_SCRIPT_URL}?action=getPayments&token=${encodeURIComponent(currentToken)}&invoiceNumber=${encodeURIComponent(inv.invoiceNumber)}`)
+      fetch(`${APPS_SCRIPT_URL}?action=getPayments&${_rptParam}&invoiceNumber=${encodeURIComponent(inv.invoiceNumber)}`)
         .then(r=>r.json()).then(d=>d.payments||[]).catch(()=>[])
     );
     const allPayments = await Promise.all(payFetches);
@@ -3490,7 +3563,7 @@ async function loadReports() {
   } catch(e) {
     document.getElementById('rp_loading').style.display = 'none';
     document.getElementById('rp_empty').style.display   = '';
-    showToast('⚠ Report load failed: '+e.message, '#B5281C');
+    showErrorBanner('Report load failed: ' + e.message + ' — data shown may be incomplete.');
   }
 }
 
