@@ -979,7 +979,7 @@
 // DEPLOYMENT SETTINGS — the only two lines you need to change per environment
 // ================================================================
 const APPS_SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbzIxtP8UP0wG5obpKWpeEO1_YowbT6erYJpCwXZpanIQR0XQS7j4ve63MAuLZsVucTq3g/exec';  // paste your deployed Apps Script URL here
-const AUTH_MODE_CLIENT = 'token';  // 'token' = static token login · 'oauth' = Google account login
+const AUTH_MODE_CLIENT = 'oauth';  // 'token' = static token login · 'oauth' = Google account login
 // ================================================================
 
 // ── Core utilities — defined early so all code can use them ─────────────────
@@ -989,6 +989,33 @@ function escHtml(s) {
     .replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;')
     .replace(/'/g,'&#39;');
+}
+
+// ── Donor name/email masking ─────────────────────────────────────────────
+// Masks display in UI only — sheet always stores real data
+function maskName(name) {
+  if (!CFG.maskDonorName) return name;
+  if (!name || name === 'Anonymous') return name;
+  // Each word: show first 2 chars + stars + last 1 char
+  return name.split(' ').map(word => {
+    if (word.length <= 3) return word[0] + '*'.repeat(word.length - 1);
+    return word.slice(0,2) + '*'.repeat(word.length - 3) + word.slice(-1);
+  }).join(' ');
+}
+
+function maskEmail(email) {
+  if (!CFG.maskDonorName) return email;
+  if (!email) return email;
+  const [local, domain] = email.split('@');
+  if (!domain) return email;
+  // local: show first 2 + stars + last 1
+  const maskedLocal = local.length <= 3
+    ? local[0] + '*'.repeat(local.length - 1)
+    : local.slice(0,2) + '*'.repeat(local.length - 3) + local.slice(-1);
+  // domain: show first char of domain name + *** + extension
+  const domParts = domain.split('.');
+  const maskedDom = domParts[0][0] + '***.' + domParts.slice(1).join('.');
+  return maskedLocal + '@' + maskedDom;
 }
 
 // Returns true if the Apps Script backend is configured and reachable
@@ -1029,6 +1056,14 @@ const CFG = {
 
   // ---- Thank you message on invoice ----
   invoiceThankYou: 'Thank you for your support!',
+
+  // ---- Donor privacy ----
+  // maskDonorName: true  → donor names shown as "Am*** **s" in Retrieve and Reports
+  //                       emails shown as "am***@gmail.com"
+  //                       The actual name is always stored unmasked in the sheet
+  //                       Only affects display in the app UI — not the PDF receipt
+  // maskDonorName: false → full name shown everywhere
+  maskDonorName: true,
 
   // ---- Donation categories ----
   // Each: { label, amount } — amount is the suggested/standard amount (0 = custom)
@@ -1138,8 +1173,37 @@ function refreshVnInvoiceNumber() {
 
 const TOKEN_KEY = 'bap_invoice_token';
 // In token mode: loaded from localStorage. In oauth mode: empty (Google handles identity).
-let currentToken = AUTH_MODE_CLIENT === 'token' ? (localStorage.getItem(TOKEN_KEY) || '') : '';
+let currentToken       = AUTH_MODE_CLIENT === 'token' ? (localStorage.getItem(TOKEN_KEY) || '') : '';
+let currentDisplayName = '';
+let currentIsAdmin     = false;
 let tokenModalIsChange = false;
+
+// ── Email state — single object replaces all loose email flags ──────────────────
+// Single object snapshot prevents race conditions from rapid clicks
+const emailState = {
+  formType:    null,   // 'sponsor' | 'vendor' | 'donation'
+  pdfBase64:   null,   // pre-generated PDF base64
+  fileName:    null,   // attachment filename
+  donFormData: null,   // donation form snapshot at open time
+  logNote:     '',     // post-save note shown on button
+  resendInv:   null,   // invoice being re-sent from retrieve tab
+  resendPayments: null, // payments for re-send receipt
+  reset() {
+    this.formType = this.pdfBase64 = this.fileName = this.donFormData = null;
+    this.logNote = ''; this.resendInv = null; this.resendPayments = null;
+  }
+};
+
+// ── Rate limiter — prevents double-submits and backend spam ───────────────
+let _lastFetchTime = 0;
+function rateLimitedFetch(url, opts, minGapMs = 800) {
+  const now = Date.now();
+  if (now - _lastFetchTime < minGapMs) {
+    return Promise.reject(new Error('Please wait a moment before trying again'));
+  }
+  _lastFetchTime = now;
+  return fetch(url, opts);
+}
 
 function showTokenModal(isChange) {
   // In oauth mode the token modal never shows — Google login handles auth
@@ -1288,7 +1352,7 @@ async function logInvoice(type, num, data) {
   if (!currentToken) return {logged:false, driveLink:''};
   try {
     const body = {token:currentToken, type, invoiceNumber:num, ...data};
-    const res = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
+    const res = await rateLimitedFetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
     const result = await res.json();
     if (result.error==='invalid_token') {
       setStatus('error','Token rejected — please re-enter');
@@ -1638,6 +1702,70 @@ function buildVnHTML(){
 // ================================================================
 // PDF
 // ================================================================
+
+// ================================================================
+// SHARED PDF BUILDERS — used by all three invoice types
+// Edit here to change header/footer/notes across all PDFs at once
+// ================================================================
+
+function pdfDrawHeader(doc, titleText) {
+  const pw = doc.internal.pageSize.getWidth();
+  const m  = 40;
+  doc.setFillColor(26,43,74); doc.rect(0,0,pw,70,'F');
+  doc.setFillColor(232,115,42); doc.rect(0,70,pw,3,'F');
+  const logoEl = document.getElementById('headerLogo');
+  if (logoEl && logoEl.naturalWidth > 0) {
+    try { doc.addImage(logoEl,'JPEG',m,8,52,52); } catch(e) { drawBP(doc,m+26,35); }
+  } else { drawBP(doc,m+26,35); }
+  doc.setFontSize(15); doc.setFont('helvetica','bold'); doc.setTextColor(255,255,255);
+  doc.text(CFG.orgName.toUpperCase(), m+62, 28);
+  doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(200,210,220);
+  doc.text(`${CFG.orgAddress}  |  ${CFG.orgWebsite}`, m+62, 42);
+  doc.setTextColor(232,115,42); doc.setFontSize(22); doc.setFont('helvetica','bold');
+  doc.text(titleText, pw-m, 30, {align:'right'});
+  doc.setTextColor(200,210,220); doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.text('Tax ID: ' + CFG.orgTaxId, pw-m, 48, {align:'right'});
+  return 90; // y position after header
+}
+
+function pdfDrawFooter(doc) {
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  doc.setFontSize(7.5); doc.setTextColor(150,150,150);
+  doc.text(
+    `${CFG.orgName}  ·  Tax ID ${CFG.orgTaxId}  ·  ${CFG.orgWebsite}`,
+    pw/2, ph-20, {align:'center'}
+  );
+}
+
+function pdfDrawNotesBox(doc, notes, y) {
+  if (!notes) return y;
+  const pw = doc.internal.pageSize.getWidth();
+  const m  = 40;
+  const nl = doc.splitTextToSize(notes, pw-2*m-20);
+  const boxH = 24 + nl.length * 11;
+  doc.setFillColor(255,248,238); doc.roundedRect(m,y,pw-2*m,boxH,3,3,'F');
+  doc.setDrawColor(232,115,42); doc.setLineWidth(0.8); doc.line(m,y,m,y+boxH);
+  doc.setLineWidth(0.2);
+  doc.setFontSize(7); doc.setFont('helvetica','bold'); doc.setTextColor(232,115,42);
+  doc.text('ADDITIONAL NOTES / CUSTOM OFFERINGS', m+8, y+9);
+  y += 16;
+  doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(26,43,74);
+  doc.text(nl, m+8, y);
+  return y + nl.length*11 + 6;
+}
+
+function pdfDrawTotalsBand(doc, label, amount, y) {
+  const pw = doc.internal.pageSize.getWidth();
+  const m  = 40;
+  doc.setFillColor(26,43,74); doc.rect(m,y,pw-2*m,28,'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(10);
+  doc.text(label, m+10, y+18);
+  doc.setFontSize(14);
+  doc.text(fmt(amount), pw-m-10, y+19, {align:'right'});
+  return y+40;
+}
+
 async function generatePDF(type){
   // Prevent double-clicks / concurrent downloads
   if (document.querySelector('.btn-download.loading')) return;
@@ -1690,6 +1818,7 @@ async function _generatePDF(type){
   if (!emailVal)  validationErrors.push('Contact email is required');
   else if (!emailValid) validationErrors.push('Contact email is not valid');
   if (isV && !selectedBoothId) validationErrors.push('Please select a booth type');
+  if (amt <= 0)   validationErrors.push('Package/booth amount must be greater than $0');
 
   if (validationErrors.length > 0) {
     showToast('⚠ ' + validationErrors[0], '#B5281C');
@@ -1803,20 +1932,7 @@ async function _generatePDF(type){
       y+=6;
     }
   } else { y+=6; }
-  if(notes){
-    y+=8;
-    const nl=doc.splitTextToSize(notes,pw-2*m-20);
-    const boxH=24+nl.length*11;
-    doc.setFillColor(255,248,238); doc.roundedRect(m,y,pw-2*m,boxH,3,3,'F');
-    doc.setDrawColor(232,115,42); doc.setLineWidth(0.8);
-    doc.line(m,y,m,y+boxH); // left orange border
-    doc.setLineWidth(0.2);
-    doc.setFontSize(7);doc.setFont('helvetica','bold');doc.setTextColor(232,115,42);
-    doc.text('ADDITIONAL NOTES / CUSTOM OFFERINGS',m+8,y+9);
-    y+=16;
-    doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(26,43,74);
-    doc.text(nl,m+8,y);y+=nl.length*11+6;
-  }
+  y = pdfDrawNotesBox(doc, notes, y + 8);
 
   // Totals
   y+=16;doc.setDrawColor(232,228,214);doc.line(m,y,pw-m,y);y+=14;
@@ -1862,8 +1978,8 @@ async function _generatePDF(type){
   const pdfBlob   = doc.output('datauristring');
   const pdfBase64 = pdfBlob.split(',')[1];
   // Store for email use
-  window._lastPdfBase64   = pdfBase64;
-  window._lastPdfFileName = `BAP_Invoice_${num}`;
+  emailState.pdfBase64   = pdfBase64;
+  emailState.fileName = `BAP_Invoice_${num}`;
 
   const logPayload = isV ? {
     invoiceDate:   document.getElementById('vn_invDate').value,
@@ -1917,7 +2033,7 @@ async function _generatePDF(type){
   };
 
   // Upload advance screenshot BEFORE logging so link goes in with the invoice row
-  if (adv > 0 && !window._emailMode) {
+  if (adv > 0 && !emailState.formType) {
     const ssFile = document.getElementById(isV?'vn_screenshot':'sp_screenshot')?.files?.[0];
     if (ssFile) {
       const ssBtn = document.querySelectorAll(`#${isV?'vendor':'sponsor'}Form .btn-download`);
@@ -1936,9 +2052,9 @@ async function _generatePDF(type){
   const logResult = await logInvoice(type, num, logPayload);
   const {logged, driveLink} = logResult;
 
-  if (window._emailMode) {
+  if (emailState.formType) {
     // Email mode — just store toast message for caller, no download, no button lock
-    window._lastLogNote = logged ? (driveLink ? ' · Saved to Drive ✓' : ' · Logged ✓') : '';
+    emailState.logNote = logged ? (driveLink ? ' · Saved to Drive ✓' : ' · Logged ✓') : '';
   } else {
     // Download mode — trigger browser download and lock button
     doc.save(`BAP_Invoice_${num}.pdf`);
@@ -2012,9 +2128,9 @@ document.getElementById('vn_taxId').value = CFG.orgTaxId;
 // ================================================================
 // EMAIL
 // ================================================================
+// emailType, emailPdfBase64, emailFileName now live in emailState object
+// kept as aliases for backward compat during transition
 let emailType = 'sponsor';
-let emailPdfBase64 = '';
-let emailFileName  = '';
 
 function isValidEmail(e) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
@@ -2027,18 +2143,40 @@ function validateEmailList(str) {
 }
 
 function openEmailModal(type) {
-  window._emailFormType = type; // track for post-send reset
-  // Run same validations as generatePDF first
-  const isV = type==='vendor';
-  const billTo = document.getElementById(isV?'vn_billTo':'sp_billTo').value.trim();
-  if (!billTo) {
-    showToast('⚠ '+(isV?'Vendor':'Sponsor')+' name is required before sending email','#B5281C');
-    const f = document.getElementById(isV?'vn_billTo':'sp_billTo');
-    f.style.borderColor='#B5281C'; f.focus();
-    setTimeout(()=>f.style.borderColor='',3000);
+  emailState.reset(); emailState.formType = type;
+  const isV = type === 'vendor';
+
+  // Full validation — same rules as Download PDF, no exceptions
+  const num       = document.getElementById(isV?'vn_invNumber':'sp_invNumber').value.trim();
+  const billTo    = document.getElementById(isV?'vn_billTo':'sp_billTo').value.trim();
+  const emailVal  = document.getElementById(isV?'vn_contactEmail':'sp_contactEmail').value.trim();
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal);
+  const amt       = parseFloat(document.getElementById(isV?'vn_boothAmt':'sp_pkgAmt')?.value||0);
+
+  const errors = [];
+  if (!num || num.includes('XXXX')) errors.push('Invoice number is not ready — wait a moment and try again');
+  if (!billTo)       errors.push((isV?'Vendor':'Sponsor') + ' name is required');
+  if (!emailVal)     errors.push('Contact email is required to send invoice');
+  else if (!emailValid) errors.push('Contact email address is not valid');
+  if (isV && !selectedBoothId) errors.push('Please select a booth type');
+
+  if (errors.length > 0) {
+    showToast('⚠ ' + errors[0], '#B5281C');
+    // Highlight the first problematic field
+    const fieldMap = {
+      [!billTo ? 'billTo' : '']: document.getElementById(isV?'vn_billTo':'sp_billTo'),
+      [(!emailVal||!emailValid) ? 'email' : '']: document.getElementById(isV?'vn_contactEmail':'sp_contactEmail'),
+    };
+    const firstField = !billTo
+      ? document.getElementById(isV?'vn_billTo':'sp_billTo')
+      : (!emailVal||!emailValid)
+        ? document.getElementById(isV?'vn_contactEmail':'sp_contactEmail')
+        : null;
+    if (firstField) { firstField.style.borderColor='#B5281C'; firstField.focus(); setTimeout(()=>firstField.style.borderColor='',3000); }
     return;
   }
-  const contactEmail = document.getElementById(isV?'vn_contactEmail':'sp_contactEmail').value.trim();
+
+  const contactEmail = emailVal;
 
   emailType = type;
   const isV2 = type==='vendor';
@@ -2059,16 +2197,15 @@ function openEmailModal(type) {
 
 function closeEmailModal() {
   document.getElementById('emailModal').classList.remove('open');
-  emailPdfBase64 = '';
-  emailFileName  = '';
-  window._resendInvoice = null;
+  emailState.reset();
+  emailState.resendInv = null;
 }
 
 async function sendEmail() {
   // Donation mode: PDF already generated in openDonEmailModal — emailPdfBase64 is set
   // Nothing extra needed here — falls through to normal send flow below
-  if (window._donEmailMode) {
-    window._donEmailMode = false;
+  if (emailState.formType === 'donation') {
+    // handled by emailState.reset()
     // emailPdfBase64 already set — just continue to send
   }
   // Validate To email
@@ -2101,10 +2238,10 @@ async function sendEmail() {
   // Generate PDF silently (same as download but no doc.save)
   try {
     // Resend mode: generate receipt from stored invoice + payments
-    if (window._resendInvoice) {
+    if (emailState.resendInv) {
       btn.innerHTML = '<span class="spin">⟳</span> Loading payments…';
-      const inv = window._resendInvoice;
-      let payments = window._resendPayments || inv._payments || null;
+      const inv = emailState.resendInv;
+      let payments = emailState.resendPayments || inv._payments || null;
       if (!payments) {
         try {
           const url = `${APPS_SCRIPT_URL}?action=getPayments&token=${encodeURIComponent(currentToken)}&invoiceNumber=${encodeURIComponent(inv.invoiceNumber)}`;
@@ -2126,19 +2263,19 @@ async function sendEmail() {
         showToast('No payments on record — use ✉ Mail to Business on the invoice form to send the original PDF', '#B5281C');
         btn.disabled = false;
         btn.textContent = '✉ Send Email';
-        window._resendInvoice  = null;
-        window._resendPayments = null;
+        emailState.resendInv  = null;
+        emailState.resendPayments = null;
         return;
       }
-      window._resendInvoice  = null;
-      window._resendPayments = null;
-    } else if (!emailPdfBase64) {
+      emailState.resendInv  = null;
+      emailState.resendPayments = null;
+    } else if (!emailState.pdfBase64) {
       // Normal sponsor/vendor email mode — generate invoice PDF
-      const pdfInfo = await buildPdfBase64(emailType);
-      emailPdfBase64 = pdfInfo.base64;
-      emailFileName  = pdfInfo.fileName;
+      const pdfInfo  = await buildPdfBase64(emailType);
+      emailState.pdfBase64 = pdfInfo.base64;
+      emailState.fileName  = pdfInfo.fileName;
     }
-    // else: donation mode — emailPdfBase64 already set in openDonEmailModal, skip generation
+    // else: donation mode — emailState.pdfBase64 already set, skip re-generation
   } catch(e) {
     status.textContent = '⚠ PDF generation failed: ' + e.message;
     btn.disabled = false; btn.textContent = '✉ Send Email';
@@ -2155,33 +2292,35 @@ async function sendEmail() {
       ccEmails:  ccRaw,
       subject:   document.getElementById('em_subject').value,
       message:   document.getElementById('em_message').value,
-      pdfBase64: emailPdfBase64,
-      fileName:  emailFileName
+      pdfBase64: emailState.pdfBase64 || emailPdfBase64,
+      fileName:  emailState.fileName  || emailFileName
     };
-    const res  = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     // Log donation to sheet if this was a donation email
-    const ft = window._emailFormType;
+    const ft = emailState.formType;
     if (ft === 'donation') {
       try {
-        // Read form data NOW before the delayed reset clears it
-        const donData   = getDonFormData();
-        const donInvNum = document.getElementById('don_invNumber').textContent;
+        // Use snapshot captured at modal-open time — form may have reset by now
+        const donData   = emailState.donFormData || getDonFormData();
+        const donInvNum = donData.invoiceNumber || document.getElementById('don_invNumber').textContent;
         const logRes  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({
           action: 'logDonation', token: currentToken,
-          ...donData, pdfBase64: emailPdfBase64,
+          ...donData, pdfBase64: emailState.pdfBase64,
           invoiceNumber: donInvNum
         })});
         const logData = await logRes.json();
-        if (logData.error) console.warn('Donation log failed:', logData.error);
+        if (logData.error && logData.error !== 'duplicate') {
+          showToast('⚠ Receipt sent but log failed: ' + logData.error, '#E8732A');
+        }
       } catch(e) { console.warn('Donation log error:', e.message); }
     }
     showToast('✓ Receipt emailed to ' + toRaw);
     setTimeout(() => {
       closeEmailModal();
-      window._emailFormType = null;
-      window._donEmailMode  = false;
+      // emailState cleared below
+      // handled by emailState.reset()
       if (ft === 'sponsor' || ft === 'vendor') resetForm(ft);
       else if (ft === 'donation') resetDonForm();
     }, 1200);
@@ -2195,16 +2334,17 @@ async function sendEmail() {
 async function buildPdfBase64(type) {
   const isV = type==='vendor';
   const num  = document.getElementById(isV?'vn_invNumber':'sp_invNumber').value.trim();
-  // Temporarily suppress download by setting email mode flag
-  window._emailMode = true;
+  // Temporarily set formType so _generatePDF suppresses download + sheet log
+  const prevType = emailState.formType;
+  emailState.formType = type + '_preview'; // signals email mode without resetting state
   try {
     await _generatePDF(type);
   } finally {
-    window._emailMode = false;
+    emailState.formType = prevType; // restore
   }
   return {
-    base64:   window._lastPdfBase64   || '',
-    fileName: window._lastPdfFileName || `BAP_Invoice_${num}`
+    base64:   emailState.pdfBase64   || '',
+    fileName: emailState.fileName || `BAP_Invoice_${num}`
   };
 }
 
@@ -2331,7 +2471,7 @@ function renderCards(results) {
       <div class="rc-top" onclick="openDetail(${i})" style="cursor:pointer;flex:1;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
         <div style="flex:1;min-width:0;">
           <div class="rc-num">${r.invoiceNumber||'—'} ${badge}<span id="card-status-${i}" class="status-badge ${statusCls}" style="font-size:10px;padding:1px 7px;margin-left:4px;">${statusLbl}</span></div>
-          <div class="rc-name">${r.billTo||'—'}</div>
+          <div class="rc-name">${escHtml(r.type==='donation' ? maskName(r.billTo||'—') : (r.billTo||'—'))}</div>
           <div class="rc-meta">${fmtDate}${meta?' · '+meta:''}</div>
         </div>
         <div class="rc-balance" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
@@ -2394,8 +2534,25 @@ async function openDetail(idx) {
   document.getElementById('rt_detail').style.display = '';
 
   // Meta grid
-  const isSponsor = inv.type === 'sponsor';
-  const metaFields = isSponsor ? [
+  const isSponsor  = inv.type === 'sponsor';
+  const isDonation = inv.type === 'donation';
+  const metaFields = isDonation ? [
+    ['Receipt #',    inv.invoiceNumber],
+    ['Fiscal Year',  inv['Fiscal Year']||inv.fiscalYear],
+    ['Donation Date',fmtInvDate(inv['Donation Date']||inv.invoiceDate||inv.donationDate)],
+    ['Donor',        maskName(inv['Donor Name']||inv.donorName||inv.billTo||'—')],
+    ['Email',        maskEmail(inv['Donor Email']||inv.donorEmail||'')],
+    ['Phone',        inv['Donor Phone']||inv.donorPhone||''],
+    ['Category',     inv['Donation Category']||inv.category],
+    ['Type',         inv['Donation Type']||inv.donationType],
+    ['Amount',       fmt(inv.amount||0)],
+    ...(inv.corpMatch==='true'||inv.corpMatch===true?[
+      ['Corp Match',   inv['Corp Match Company']||inv.corpMatchCompany],
+      ['Match Amt',    fmt(inv['Corp Match Amount']||inv.corpMatchAmount||0)],
+    ]:[]),
+    ['Total Value',  fmt(inv['Total Donation Value']||inv.totalValue||0)],
+    ...(inv['BAP POC']||inv.bapPoc?[['BAP POC', inv['BAP POC']||inv.bapPoc]]:[]),
+  ] : isSponsor ? [
     ['Invoice #',    inv.invoiceNumber],
     ['Fiscal Year',  inv['Fiscal Year']||inv.fiscalYear],
     ['Invoice Date', fmtInvDate(inv['Invoice Date']||inv.invoiceDate)],
@@ -2405,7 +2562,7 @@ async function openDetail(idx) {
     ['Email',        inv['Contact Email']||inv.contactEmail],
     ['Package',      inv['Package']||inv.packageName],
     ['Package Amt',  fmt(inv.packageAmount||0)],
-    ['Invoice Total', fmt(getInvoicedAmount(inv))],
+    ['Invoice Total',fmt(getInvoicedAmount(inv))],
     ...(parseFloat(inv['Advance Paid']||inv.advancePaid||0)>0?[['Advance Paid', fmt(parseFloat(inv['Advance Paid']||inv.advancePaid))]]:[]),
     ...(parseFloat(inv['Discount']||inv.discount||0)>0?[['Discount', fmt(parseFloat(inv['Discount']||inv.discount))]]:[]),
     ...(inv['Event Name']||inv.eventName?[['Event', inv['Event Name']||inv.eventName]]:[]),
@@ -2420,7 +2577,7 @@ async function openDetail(idx) {
     ['Email',        inv['Contact Email']||inv.contactEmail],
     ['Booth Type',   inv['Booth Type']||inv.boothType],
     ['Booth Amt',    fmt(inv.packageAmount||0)],
-    ['Invoice Total', fmt(getInvoicedAmount(inv))],
+    ['Invoice Total',fmt(getInvoicedAmount(inv))],
     ...(parseFloat(inv['Advance Paid']||inv.advancePaid||0)>0?[['Advance Paid', fmt(parseFloat(inv['Advance Paid']||inv.advancePaid))]]:[]),
     ...(parseFloat(inv['Discount']||inv.discount||0)>0?[['Discount', fmt(parseFloat(inv['Discount']||inv.discount))]]:[]),
     ...(inv['Event Name']||inv.eventName?[['Event', inv['Event Name']||inv.eventName]]:[]),
@@ -2600,7 +2757,7 @@ async function submitPayment(withReceipt) {
       notes:          document.getElementById('rt_payNotes').value,
       screenshotLink
     };
-    const res  = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
@@ -2877,7 +3034,7 @@ async function sendReceiptEmail() {
       pdfBase64: _lastReceiptBase64,
       fileName:  _lastReceiptFileName
     };
-    const res  = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     status.textContent = '✓ Receipt sent to ' + toRaw;
@@ -2910,8 +3067,8 @@ async function resendLatest(idx) {
 
   // Store context so sendEmail knows what to attach
   // Use cached payments if available (fetched during search)
-  window._resendInvoice = inv;
-  window._resendPayments = null; // always fetch fresh
+  emailState.resendInv = inv;
+  emailState.resendPayments = null; // always fetch fresh
   document.getElementById('emailModal').classList.add('open');
 }
 
@@ -3100,7 +3257,7 @@ function renderTables(sponsors, vendors, donations) {
     ? '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text-muted);">No donations recorded</td></tr>'
     : donations.map(r => `<tr style="border-bottom:1px solid var(--light-border);">
         <td style="padding:10px 16px;font-size:12px;font-weight:600;color:#2E7D52;">${r.invoiceNumber||'—'}</td>
-        <td style="padding:10px 16px;">${r.billTo||'—'}</td>
+        <td style="padding:10px 16px;">${escHtml(maskName(r.billTo||'—'))}</td>
         <td style="padding:10px 16px;color:var(--text-muted);">${r.category||'—'}</td>
         <td style="padding:10px 16px;text-align:right;font-weight:600;">${fmt(r.amount||0)}</td>
         <td style="padding:10px 16px;text-align:right;color:var(--success);">${r.corpMatch==='true'||r.corpMatch===true?fmt(r.corpMatchAmount||0):'—'}</td>
@@ -3307,7 +3464,7 @@ async function uploadScreenshot(file, invoiceNumber, tag) {
       imageBase64:  base64
     };
 
-    const res  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify(body) });
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify(body) });
     const data = await res.json();
     if (data.error) return { success: false, driveLink: '', error: data.error };
     return { success: true, driveLink: data.driveLink||'', error: '' };
@@ -3442,7 +3599,7 @@ async function initiateArchive() {
   if (!confirm(`Archive FY ${fy}?\n\nThis will export all data to Excel and clear the live sheets.\nThis action requires ${ARCHIVE_APPROVERS_REQUIRED_CLIENT} other admin(s) to approve.`)) return;
   document.getElementById('arch_content').innerHTML = '<div style="text-align:center;padding:20px;"><span class="spin-slow">⟳</span> Sending request…</div>';
   try {
-    const res  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveInitiate', token:currentToken, fy }) });
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveInitiate', token:currentToken, fy }) });
     const data = await res.json();
     if (data.error) {
       const msg = data.message || data.error;
@@ -3458,7 +3615,7 @@ async function initiateArchive() {
 async function approveArchive() {
   document.getElementById('arch_content').innerHTML = '<div style="text-align:center;padding:20px;"><span class="spin-slow">⟳</span> Approving…</div>';
   try {
-    const res  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveApprove', token:currentToken }) });
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveApprove', token:currentToken }) });
     const data = await res.json();
     if (data.error) {
       const msg = data.message || data.error;
@@ -3480,7 +3637,7 @@ async function approveArchive() {
 async function rejectArchive() {
   if (!confirm('Reject this archive request?')) return;
   try {
-    const res  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveReject', token:currentToken }) });
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveReject', token:currentToken }) });
     const data = await res.json();
     if (data.error) { showToast('⚠ ' + data.error, '#B5281C'); return; }
     showToast('Archive request rejected.');
@@ -3491,7 +3648,7 @@ async function rejectArchive() {
 async function cancelArchive() {
   if (!confirm('Cancel this archive request?')) return;
   try {
-    const res  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveCancel', token:currentToken }) });
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveCancel', token:currentToken }) });
     const data = await res.json();
     if (data.error) { showToast('⚠ ' + data.error, '#B5281C'); return; }
     showToast('Archive request cancelled.');
@@ -3689,22 +3846,7 @@ async function generateDonPDF(emailMode) {
   const m  = 40;
   let y    = 0;
 
-  // Header
-  doc.setFillColor(26,43,74); doc.rect(0,0,pw,70,'F');
-  doc.setFillColor(232,115,42); doc.rect(0,70,pw,3,'F');
-  const logoEl = document.getElementById('headerLogo');
-  if (logoEl && logoEl.naturalWidth>0) { try{doc.addImage(logoEl,'JPEG',m,8,52,52);}catch(e){drawBP(doc,m+26,35);} }
-  else drawBP(doc,m+26,35);
-  doc.setFontSize(15);doc.setFont('helvetica','bold');doc.setTextColor(255,255,255);
-  doc.text(CFG.orgName.toUpperCase(), m+62, 28);
-  doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(200,210,220);
-  doc.text(`${CFG.orgAddress}  |  ${CFG.orgWebsite}`, m+62, 42);
-  doc.setTextColor(232,115,42);doc.setFontSize(22);doc.setFont('helvetica','bold');
-  doc.text('DONATION RECEIPT', pw-m, 30, {align:'right'});
-  doc.setTextColor(200,210,220);doc.setFontSize(9);doc.setFont('helvetica','normal');
-  doc.text('Tax ID: ' + CFG.orgTaxId, pw-m, 48, {align:'right'});
-
-  y = 90;
+  y = pdfDrawHeader(doc, 'DONATION RECEIPT');
 
   // Meta row
   const metaDate = d.donationDate ? new Date(d.donationDate+'T00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : '';
@@ -3773,18 +3915,7 @@ async function generateDonPDF(emailMode) {
   doc.text(fmt(d.totalValue), pw-m-10, y+19, {align:'right'});
   y += 40;
 
-  // Notes box
-  if (d.notes) {
-    doc.setFillColor(255,248,238);doc.roundedRect(m,y,pw-2*m,20+Math.ceil(d.notes.length/80)*11,3,3,'F');
-    doc.setDrawColor(232,115,42);doc.setLineWidth(0.8);doc.line(m,y,m,y+20+Math.ceil(d.notes.length/80)*11);
-    doc.setLineWidth(0.2);
-    doc.setFontSize(7);doc.setFont('helvetica','bold');doc.setTextColor(232,115,42);
-    doc.text('ADDITIONAL NOTES',m+8,y+9);
-    y+=14;
-    const nl=doc.splitTextToSize(d.notes,pw-2*m-16);
-    doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(26,43,74);
-    doc.text(nl,m+8,y);y+=nl.length*11+10;
-  }
+  y = pdfDrawNotesBox(doc, d.notes, y + 8);
 
   // Thank you message
   y += 10;
@@ -3801,9 +3932,7 @@ async function generateDonPDF(emailMode) {
   doc.setFont('helvetica','normal');doc.setTextColor(107,122,147);
   doc.text(CFG.orgTreasurerTitle, pw-m-10, y+12, {align:'right'});
 
-  // Footer
-  doc.setFontSize(7.5);doc.setTextColor(150,150,150);
-  doc.text(`${CFG.orgName}  ·  Tax ID ${CFG.orgTaxId}  ·  ${CFG.orgWebsite}`, pw/2, doc.internal.pageSize.getHeight()-20, {align:'center'});
+  pdfDrawFooter(doc);
 
   if (emailMode) return doc.output('datauristring').split(',')[1];
 
@@ -3813,7 +3942,7 @@ async function generateDonPDF(emailMode) {
   btn.innerHTML = '<span class="spin">⟳</span> Saving…'; btn.disabled = true;
 
   try {
-    const res  = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
       action:'logDonation', token:currentToken, ...d, pdfBase64,
       invoiceNumber: document.getElementById('don_invNumber').textContent
     })});
@@ -3890,9 +4019,10 @@ async function openDonEmailModal() {
 
   if (!pdfB64) return; // generateDonPDF already showed error toast
 
-  // Store PDF for sendEmail to use directly — no re-generation needed
-  emailPdfBase64 = pdfB64;
-  emailFileName  = d.invoiceNumber + '_Donation_Receipt.pdf';
+  // Store in emailState — no re-generation needed, no race condition
+  emailState.pdfBase64   = pdfB64;
+  emailState.fileName    = d.invoiceNumber + '_Donation_Receipt.pdf';
+  emailState.donFormData = d;  // snapshot form data now before any reset
 
   // Pre-fill email modal
   document.getElementById('em_toEmail').value  = d.donorEmail;
@@ -3919,9 +4049,9 @@ ${CFG.orgWebsite}`;
   document.getElementById('em_sendBtn').innerHTML      = '✉ Send Email';
 
   // Mark as donation mode so sendEmail uses pre-generated PDF
-  window._donEmailMode  = true;
-  window._emailMode     = false; // use emailPdfBase64 directly, not re-generate
-  window._emailFormType = 'donation';
+  emailState.formType = 'donation';
+  emailState.formType     = false; // use emailPdfBase64 directly, not re-generate
+  emailState.formType = 'donation';
   document.getElementById('emailModal').classList.add('open');
 }
 
