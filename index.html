@@ -602,6 +602,10 @@
   </div>
 
   <!-- Results list -->
+  <div id="rt_loadingPayments" style="display:none;font-size:12px;color:var(--text-muted);padding:6px 4px;align-items:center;gap:6px;">
+    <span class="spin" style="font-size:14px;">⟳</span>
+    <span></span>
+  </div>
   <div id="rt_results" style="margin-top:4px;"></div>
 
   <!-- Detail view (hidden until a card is clicked) -->
@@ -907,6 +911,7 @@
               <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Invoice #</th>
               <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Sponsor</th>
               <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Package</th>
+              <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Booth</th>
               <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Invoiced</th>
               <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Collected</th>
               <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Outstanding</th>
@@ -2532,8 +2537,44 @@ async function _generatePDF(type){
   y+=16;doc.setDrawColor(232,228,214);doc.line(m,y,pw-m,y);y+=14;
   const tx=pw-m-210;
   doc.setFontSize(10);doc.setTextColor(107,122,147);doc.setFont('helvetica','normal');
-  doc.text(isV?'Booth Amount':'Package Amount',tx,y);
-  doc.setTextColor(26,43,74);doc.setFont('helvetica','bold');doc.text(fmt(amt),pw-m-10,y,{align:'right'});
+
+  // For sponsor+booth: show sponsorship portion, each booth row, then total
+  if (!isV) {
+    const hasBooth = document.getElementById('sp_hasBooth').checked;
+    const booths   = hasBooth ? getBoothDetails() : [];
+    if (booths.length > 0) {
+      const boothTotal = booths.reduce((s,b)=>s+(b.amount||0),0);
+      const sponsPortion = Math.max(0, amt - boothTotal);
+      // Sponsorship portion row
+      doc.text('Sponsorship Portion',tx,y);
+      doc.setTextColor(26,43,74);doc.setFont('helvetica','bold');
+      doc.text(fmt(sponsPortion),pw-m-10,y,{align:'right'});
+      // One row per booth
+      booths.forEach((b,i) => {
+        y+=14;
+        const bLabel = booths.length>1 ? `Booth ${i+1} Allocation` : 'Booth Allocation';
+        const bDetail = [b.type,b.size,b.tables?b.tables+'T':'',b.chairs?b.chairs+'C':'',b.parking?b.parking+'P':''].filter(Boolean).join(' · ');
+        doc.setFontSize(10);doc.setTextColor(107,122,147);doc.setFont('helvetica','normal');
+        doc.text(bLabel,tx,y);
+        doc.setTextColor(26,43,74);doc.setFont('helvetica','bold');
+        doc.text(b.amount===0?'Complimentary':fmt(b.amount),pw-m-10,y,{align:'right'});
+        if(bDetail){y+=10;doc.setFontSize(8);doc.setTextColor(160,160,160);doc.setFont('helvetica','normal');doc.text(bDetail,tx,y);doc.setFontSize(10);}
+      });
+      y+=14;
+      // Total commitment row
+      doc.setTextColor(107,122,147);doc.setFont('helvetica','normal');
+      doc.text('Total Commitment',tx,y);
+      doc.setTextColor(26,43,74);doc.setFont('helvetica','bold');
+      doc.text(fmt(amt),pw-m-10,y,{align:'right'});
+    } else {
+      doc.text('Package Amount',tx,y);
+      doc.setTextColor(26,43,74);doc.setFont('helvetica','bold');doc.text(fmt(amt),pw-m-10,y,{align:'right'});
+    }
+  } else {
+    doc.text('Booth Amount',tx,y);
+    doc.setTextColor(26,43,74);doc.setFont('helvetica','bold');doc.text(fmt(amt),pw-m-10,y,{align:'right'});
+  }
+
   if(disc>0){
     y+=16;
     doc.setTextColor(107,122,147);doc.setFont('helvetica','normal');doc.text('Discount',tx,y);
@@ -3044,19 +3085,33 @@ async function renderResults(results, q) {
   // Fetch payments per card — each updates its own DOM when ready
   if (hasBackend() && (currentSession || currentToken)) {
     let totalPaid=0, totalOut=0, done=0, n=results.length;
+    // Show loading banner while payment data fetches
+    const loadingBanner = document.getElementById('rt_loadingPayments');
+    if (loadingBanner && n > 0) {
+      const bannerSpan = loadingBanner.querySelector('span:last-child');
+      if (bannerSpan) bannerSpan.textContent = `Loading payment data for ${n} invoice${n===1?'':'s'}…`;
+      loadingBanner.style.display = 'flex';
+    }
     results.forEach((r,i) => {
-      // Donations are fully paid at point of recording — no payment log needed
+      // Donations are fully paid at point of recording — resolve after short delay
+      // so all cards appear to load at the same visual pace
       if (r.type === 'donation') {
         const donAmt = parseFloat(r.totalValue || r.amount || 0);
         r._paidTotal = donAmt; r._outstandingTotal = 0;
-        const pEl=document.getElementById(`card-paid-${i}`);
-        const bEl=document.getElementById(`card-bal-${i}`);
-        const sEl=document.getElementById(`card-status-${i}`);
-        if(pEl) pEl.innerHTML=fmt(donAmt);
-        if(bEl) bEl.innerHTML=`<span style='color:var(--success)'>${fmt(0)}</span>`;
-        if(sEl){sEl.className='status-badge status-paid';sEl.textContent='PAID';}
-        totalPaid+=donAmt; done++;
-        if(done===n){document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);}
+        setTimeout(() => {
+          const pEl=document.getElementById(`card-paid-${i}`);
+          const bEl=document.getElementById(`card-bal-${i}`);
+          const sEl=document.getElementById(`card-status-${i}`);
+          if(pEl) pEl.innerHTML=fmt(donAmt);
+          if(bEl) bEl.innerHTML=`<span style='color:var(--success)'>${fmt(0)}</span>`;
+          if(sEl){sEl.className='status-badge status-paid';sEl.textContent='PAID';}
+          totalPaid+=donAmt; done++;
+          if(done===n){
+            document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);
+            document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);
+            document.getElementById('rt_loadingPayments').style.display='none';
+          }
+        }, 300); // small delay so all cards appear to load together
         return;
       }
       const _sp = currentSession ? `session=${encodeURIComponent(currentSession.sessionToken)}` : `token=${encodeURIComponent(currentToken)}`;
@@ -3075,14 +3130,23 @@ async function renderResults(results, q) {
           if(bEl) bEl.innerHTML=`<span style='color:${bal>0?'var(--deep-red)':'var(--success)'}'>${fmt(bal)}</span>`;
           if(sEl){const sc=bal<=0?'status-paid':paid>0?'status-partial':'status-unpaid';const sl=bal<=0?'PAID':paid>0?'PARTIAL':'UNPAID';sEl.className=`status-badge ${sc}`;sEl.textContent=sl;}
           totalPaid+=paid; totalOut+=bal; done++;
-          if(done===n){document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);}
+          if(done===n){
+            document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);
+            document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);
+            document.getElementById('rt_loadingPayments').style.display='none';
+          }
         })
         .catch(()=>{
           done++;
           const pEl=document.getElementById(`card-paid-${i}`); if(pEl) pEl.innerHTML='—';
           const bEl=document.getElementById(`card-bal-${i}`);  if(bEl) bEl.innerHTML='—';
-          if(done===n){document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);}
+          if(done===n){
+            document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);
+            document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);
+            document.getElementById('rt_loadingPayments').style.display='none';
+          }
           showErrorBanner('Could not load payment data — balances may be incomplete. Check your connection and refresh.');
+          if(done===n) document.getElementById('rt_loadingPayments').style.display='none';
         });
     });
   } else {
@@ -4005,7 +4069,7 @@ function renderTables(sponsors, vendors, donations) {
   // ── Sponsor table ────────────────────────────────────────────────────────
   document.getElementById('rp_spCount').textContent = `(${sponsors.length} invoice${sponsors.length===1?'':'s'})`;
   document.getElementById('rp_spBody').innerHTML = sponsors.length === 0
-    ? '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-muted);">No sponsorship invoices</td></tr>'
+    ? '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--text-muted);">No sponsorship invoices</td></tr>'
     : sponsors.map(r => rpTableRow(r, r['Package']||r.packageName||'—')).join('');
 
   // Vendor table
@@ -4030,18 +4094,24 @@ function renderTables(sponsors, vendors, donations) {
 
 function rpTableRow(r, col3) {
   const statusCls = r.status==='PAID' ? 'status-paid' : r.status==='PARTIAL' ? 'status-partial' : 'status-unpaid';
-  const hasSplit  = r.type==='sponsor' && r.hasBooth && (r.boothAmount||0) > 0;
+  const hasSplit     = r.type==='sponsor' && r.hasBooth && (r.boothAmount||0) > 0;
   const sponsPortion = hasSplit ? Math.max(0, (r.finalDue||0) - (r.boothAmount||0)) : null;
-  const boothBadge = (r.type==='sponsor' && r.hasBooth)
-    ? `<span style="font-size:10px;background:#E8F0FE;color:#2A5BC8;border-radius:4px;padding:1px 6px;margin-left:6px;">+Booth ${r.boothAmount===0?'(free)':fmt(r.boothAmount)}</span>`
-    : '';
-  const splitDetail = hasSplit
+  const splitDetail  = hasSplit
     ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Spons ${fmt(sponsPortion)} · Booth ${fmt(r.boothAmount)}</div>`
+    : '';
+  // Booth column — only shown in sponsorship table
+  // Shows booth count + amount for sponsors with booth, '—' for others
+  const boothCol = r.type === 'sponsor'
+    ? (r.hasBooth
+        ? `<span style="font-weight:600;color:#2A5BC8;">${fmt(r.boothAmount||0)}</span>
+           ${r.boothCount > 1 ? `<div style="font-size:11px;color:var(--text-muted);">${r.boothCount} booths</div>` : ''}`
+        : '<span style="color:var(--text-muted);">—</span>')
     : '';
   return `<tr style="border-bottom:1px solid var(--light-border);">
     <td style="padding:10px 16px;font-size:12px;font-weight:600;color:#2A5BC8;">${r.invoiceNumber||'—'}</td>
-    <td style="padding:10px 16px;">${r.billTo||'—'}${boothBadge}${splitDetail}</td>
+    <td style="padding:10px 16px;">${r.billTo||'—'}${splitDetail}</td>
     <td style="padding:10px 16px;color:var(--text-muted);">${col3}</td>
+    ${r.type==='sponsor' ? `<td style="padding:10px 16px;text-align:right;">${boothCol}</td>` : ''}
     <td style="padding:10px 16px;text-align:right;font-weight:600;">${fmt(r.finalDue||0)}</td>
     <td style="padding:10px 16px;text-align:right;color:var(--success);font-weight:600;">${fmt(r.collected||0)}</td>
     <td style="padding:10px 16px;text-align:right;color:var(--deep-red);font-weight:600;">${fmt(r.outstanding||0)}</td>
