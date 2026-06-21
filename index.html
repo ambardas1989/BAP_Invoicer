@@ -587,6 +587,7 @@
       </select>
       <button class="btn btn-primary" onclick="doSearch()" style="white-space:nowrap;">🔍 Search</button>
       <button class="btn btn-secondary" onclick="doLoadAll()" style="white-space:nowrap;">📋 Load All</button>
+      <button class="btn" id="rt_refreshBtn" onclick="doRefresh()" title="Refresh results" style="display:none;background:none;border:1.5px solid var(--light-border);padding:8px 12px;font-size:15px;">↻</button>
     </div>
     <div id="rt_searchStatus" style="font-size:12px;color:var(--text-muted);margin-top:6px;"></div>
   </div>
@@ -1361,6 +1362,7 @@ function getBrowserFingerprint() {
 let currentDisplayName = '';
 let currentIsAdmin     = false;
 let tokenModalIsChange = false;
+let _lastSearchWasLoadAll = false;
 
 // ── Email state — single object replaces all loose email flags ──────────────────
 // Single object snapshot prevents race conditions from rapid clicks
@@ -3021,7 +3023,17 @@ async function doLoadAll() {
   await doSearch(true);
 }
 
+function doRefresh() {
+  if (_lastSearchWasLoadAll) {
+    document.getElementById('rt_query').value = '';
+    doSearch(true);
+  } else {
+    doSearch(false);
+  }
+}
+
 async function doSearch(loadAll=false) {
+  _lastSearchWasLoadAll = loadAll;
   const q = document.getElementById('rt_query').value.trim();
   const type = document.getElementById('rt_type').value;
   if (!q && !loadAll) { showToast('Enter a search term first','#B5281C'); return; }
@@ -3032,6 +3044,8 @@ async function doSearch(loadAll=false) {
   document.getElementById('rt_searchStatus').innerHTML = loadAll ? '<span class="spin">⟳</span> Loading all invoices…' : '<span class="spin">⟳</span> Searching…';
   document.getElementById('rt_results').innerHTML = '';
   document.getElementById('rt_summary').style.display = 'none';
+  const _rb = document.getElementById('rt_refreshBtn');
+  if (_rb) _rb.style.display = 'none';
   closeDetail();
 
   try {
@@ -3070,6 +3084,8 @@ async function renderResults(results, q) {
 
   dismissErrorBanner();
   status.textContent = results.length + ' invoice' + (results.length===1?'':'s') + ' found';
+  const refreshBtn = document.getElementById('rt_refreshBtn');
+  if (refreshBtn) refreshBtn.style.display = '';
 
   // Show summary immediately with invoice totals
   let totalInvoiced = results.reduce((s,r) => s+getInvoicedAmount(r), 0);
@@ -3212,15 +3228,17 @@ function refreshCards() {
 // DETAIL VIEW
 // ================================================================
 function getInvoicedAmount(inv) {
-  // Package = total commitment for all invoice types
-  // Booth is carved out of package — does NOT add to total
-  const pkg   = parseFloat(inv['Package Amount']||inv.packageAmount||0);
   const disc  = parseFloat(inv['Discount']||inv.discount||0);
   const total = parseFloat(inv['Total Commitment']||inv.totalCommitment||0);
-  // Total Commitment stored = packageAmount (they are equal now)
+  // Sponsor invoices store Total Commitment
   if (total > 0) return Math.max(0, total - disc);
-  if (pkg > 0)   return Math.max(0, pkg - disc);
-  // Fallback: finalDue + advance
+  // Sponsor invoices without booth — use Package Amount
+  const pkg = parseFloat(inv['Package Amount']||inv.packageAmount||0);
+  if (pkg > 0) return Math.max(0, pkg - disc);
+  // Vendor invoices use Booth Amount
+  const booth = parseFloat(inv['Booth Amount']||inv.boothAmount||0);
+  if (booth > 0) return Math.max(0, booth - disc);
+  // Final fallback: finalDue + advance
   return Math.max(0, (parseFloat(inv.finalDue||0)) + (parseFloat(inv['Advance Paid']||inv.advancePaid||0)));
 }
 
