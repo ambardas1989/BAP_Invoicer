@@ -908,6 +908,14 @@
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;font-size:13px;" id="rp_spTable">
           <thead>
+            <tr style="position:sticky;top:0;z-index:2;background:#1A2B4A;">
+              <td colspan="3" style="padding:8px 16px;font-size:11px;font-weight:600;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.5px;">Sponsorship Total</td>
+              <td style="padding:8px 16px;text-align:right;font-size:13px;font-weight:700;color:#fff;" id="rp_sp_tot_booth">—</td>
+              <td style="padding:8px 16px;text-align:right;font-size:13px;font-weight:700;color:#fff;" id="rp_sp_tot_inv">—</td>
+              <td style="padding:8px 16px;text-align:right;font-size:13px;font-weight:700;color:#7EDBA0;" id="rp_sp_tot_col">—</td>
+              <td style="padding:8px 16px;text-align:right;font-size:13px;font-weight:700;color:#FF8A80;" id="rp_sp_tot_out">—</td>
+              <td></td>
+            </tr>
             <tr style="background:#F8F4F0;">
               <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Invoice #</th>
               <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Sponsor</th>
@@ -4053,11 +4061,15 @@ function renderTables(sponsors, vendors, donations) {
   // ── Sponsor table ────────────────────────────────────────────────────────
   document.getElementById('rp_spCount').textContent = `(${sponsors.length} invoice${sponsors.length===1?'':'s'})`;
   const spTotals = rpTotals(sponsors);
-  document.getElementById('rp_sp_tot_inv').textContent = fmt(spTotals.invoiced);
-  document.getElementById('rp_sp_tot_col').textContent = fmt(spTotals.collected);
-  document.getElementById('rp_sp_tot_out').textContent = fmt(spTotals.outstanding);
+  const _spInv  = document.getElementById('rp_sp_tot_inv');
+  const _spCol  = document.getElementById('rp_sp_tot_col');
+  const _spOut  = document.getElementById('rp_sp_tot_out');
+  const _spBoot = document.getElementById('rp_sp_tot_booth');
   const spBoothTot = sponsors.reduce((s,r)=>s+(r.hasBooth?(r.boothAmount||0):0),0);
-  document.getElementById('rp_sp_tot_booth').textContent = spBoothTot > 0 ? fmt(spBoothTot) : '—';
+  if(_spInv)  _spInv.textContent  = fmt(spTotals.invoiced);
+  if(_spCol)  _spCol.textContent  = fmt(spTotals.collected);
+  if(_spOut)  _spOut.textContent  = fmt(spTotals.outstanding);
+  if(_spBoot) _spBoot.textContent = spBoothTot > 0 ? fmt(spBoothTot) : '—';
   document.getElementById('rp_spBody').innerHTML = sponsors.length === 0
     ? '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--text-muted);">No sponsorship invoices</td></tr>'
     : sponsors.map(r => rpTableRow(r, r['Package']||r.packageName||'—')).join('');
@@ -4065,9 +4077,12 @@ function renderTables(sponsors, vendors, donations) {
   // Vendor table
   document.getElementById('rp_vnCount').textContent = `(${vendors.length} invoice${vendors.length===1?'':'s'})`;
   const vnTotals = rpTotals(vendors);
-  document.getElementById('rp_vn_tot_inv').textContent = fmt(vnTotals.invoiced);
-  document.getElementById('rp_vn_tot_col').textContent = fmt(vnTotals.collected);
-  document.getElementById('rp_vn_tot_out').textContent = fmt(vnTotals.outstanding);
+  const _vnInv = document.getElementById('rp_vn_tot_inv');
+  const _vnCol = document.getElementById('rp_vn_tot_col');
+  const _vnOut = document.getElementById('rp_vn_tot_out');
+  if(_vnInv) _vnInv.textContent = fmt(vnTotals.invoiced);
+  if(_vnCol) _vnCol.textContent = fmt(vnTotals.collected);
+  if(_vnOut) _vnOut.textContent = fmt(vnTotals.outstanding);
   document.getElementById('rp_vnBody').innerHTML = vendors.length === 0
     ? '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-muted);">No vendor invoices</td></tr>'
     : vendors.map(r => rpTableRow(r, r['Event Name']||r.eventName||'—')).join('');
@@ -4076,9 +4091,12 @@ function renderTables(sponsors, vendors, donations) {
   const donAmtTot  = donations.reduce((s,r)=>s+(r.amount||0),0);
   const donCorpTot = donations.reduce((s,r)=>s+(r.corpMatch===true||r.corpMatch==='true'?(r.corpMatchAmount||0):0),0);
   const donValTot  = donations.reduce((s,r)=>s+(r.totalValue||r.finalDue||0),0);
-  document.getElementById('rp_don_tot_amt').textContent  = fmt(donAmtTot);
-  document.getElementById('rp_don_tot_corp').textContent = donCorpTot > 0 ? fmt(donCorpTot) : '—';
-  document.getElementById('rp_don_tot_val').textContent  = fmt(donValTot);
+  const _donAmt  = document.getElementById('rp_don_tot_amt');
+  const _donCorp = document.getElementById('rp_don_tot_corp');
+  const _donVal  = document.getElementById('rp_don_tot_val');
+  if(_donAmt)  _donAmt.textContent  = fmt(donAmtTot);
+  if(_donCorp) _donCorp.textContent = donCorpTot > 0 ? fmt(donCorpTot) : '—';
+  if(_donVal)  _donVal.textContent  = fmt(donValTot);
   document.getElementById('rp_donCount').textContent = `(${donations.length} receipt${donations.length===1?'':'s'})`;
   document.getElementById('rp_donBody').innerHTML = donations.length === 0
     ? '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text-muted);">No donations recorded</td></tr>'
