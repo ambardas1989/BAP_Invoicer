@@ -279,7 +279,7 @@
     <span class="status-text" id="statusText">Connecting…</span>
     <span class="status-token" id="statusToken"></span>
   </div>
-  <button class="sb-link" onclick="showTokenModal(true)">Change token</button>
+  <button class="sb-link" onclick="showTokenModal(true)">Switch user</button>
 </div>
 
 <div style="text-align:center;">
@@ -1586,6 +1586,8 @@ async function initConnection() {
 
   // Non-MFA path — validate token directly via whoAmI
   if (!currentToken) { showTokenModal(false); return; }
+  // Don't attempt connection if login modal is already open (OTP in progress etc.)
+  if (document.getElementById('tokenModal').classList.contains('open')) return;
   setStatus('', 'Connecting…');
   try {
     const res  = await fetch(`${APPS_SCRIPT_URL}?action=whoAmI&token=${encodeURIComponent(currentToken)}`);
