@@ -921,6 +921,7 @@
           </thead>
           <tbody id="rp_spBody"></tbody>
         </table>
+          </div>
       </div>
     </div>
     <!-- Vendor table -->
@@ -932,6 +933,13 @@
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;font-size:13px;" id="rp_vnTable">
           <thead>
+            <tr style="position:sticky;top:0;z-index:2;background:#1A2B4A;">
+              <td colspan="3" style="padding:8px 16px;font-size:11px;font-weight:600;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.5px;">Vendor / Booth Total</td>
+              <td style="padding:8px 16px;text-align:right;font-size:13px;font-weight:700;color:#fff;" id="rp_vn_tot_inv">—</td>
+              <td style="padding:8px 16px;text-align:right;font-size:13px;font-weight:700;color:#7EDBA0;" id="rp_vn_tot_col">—</td>
+              <td style="padding:8px 16px;text-align:right;font-size:13px;font-weight:700;color:#FF8A80;" id="rp_vn_tot_out">—</td>
+              <td></td>
+            </tr>
             <tr style="background:#F8F4F0;">
               <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Invoice #</th>
               <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Vendor</th>
@@ -944,6 +952,7 @@
           </thead>
           <tbody id="rp_vnBody"></tbody>
         </table>
+          </div>
       </div>
     </div>
   </div>
@@ -957,17 +966,24 @@
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;font-size:13px;" id="rp_donTable">
           <thead>
+            <tr style="position:sticky;top:0;z-index:2;background:#1A2B4A;">
+              <td colspan="3" style="padding:8px 16px;font-size:11px;font-weight:600;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.5px;">Donations Total</td>
+              <td style="padding:8px 16px;text-align:right;font-size:13px;font-weight:700;color:#fff;" id="rp_don_tot_amt">—</td>
+              <td style="padding:8px 16px;text-align:right;font-size:13px;font-weight:700;color:#fff;" id="rp_don_tot_corp">—</td>
+              <td style="padding:8px 16px;text-align:right;font-size:13px;font-weight:700;color:#fff;" id="rp_don_tot_val">—</td>
+            </tr>
             <tr style="background:#F8F4F0;">
               <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Receipt #</th>
               <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Donor</th>
               <th style="padding:10px 16px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Category</th>
               <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Amount</th>
               <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Corp Match</th>
-              <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Total</th>
+              <th style="padding:10px 16px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">Total Value</th>
             </tr>
           </thead>
           <tbody id="rp_donBody"></tbody>
         </table>
+          </div>
       </div>
     </div>
     <div id="rp_empty" style="display:none;text-align:center;padding:40px;color:var(--text-muted);">
@@ -3099,71 +3115,33 @@ async function renderResults(results, q) {
   renderCards(results);
 
   // Fetch payments per card — each updates its own DOM when ready
-  if (hasBackend() && (currentSession || currentToken)) {
+  if (true) {  // server already enriched all results
     let totalPaid=0, totalOut=0, done=0, n=results.length;
-    // Show loading banner while payment data fetches
     const loadingBanner = document.getElementById('rt_loadingPayments');
-    if (loadingBanner && n > 0) {
-      const bannerSpan = loadingBanner.querySelector('span:last-child');
-      if (bannerSpan) bannerSpan.textContent = `Loading payment data for ${n} invoice${n===1?'':'s'}…`;
-      loadingBanner.style.display = 'flex';
-    }
+    if (loadingBanner) loadingBanner.style.display = 'none'; // no async fetching needed
+
     results.forEach((r,i) => {
-      // Donations are fully paid at point of recording — resolve after short delay
-      // so all cards appear to load at the same visual pace
-      if (r.type === 'donation') {
-        const donAmt = parseFloat(r.totalValue || r.amount || 0);
-        r._paidTotal = donAmt; r._outstandingTotal = 0;
-        setTimeout(() => {
-          const pEl=document.getElementById(`card-paid-${i}`);
-          const bEl=document.getElementById(`card-bal-${i}`);
-          const sEl=document.getElementById(`card-status-${i}`);
-          if(pEl) pEl.innerHTML=fmt(donAmt);
-          if(bEl) bEl.innerHTML=`<span style='color:var(--success)'>${fmt(0)}</span>`;
-          if(sEl){sEl.className='status-badge status-paid';sEl.textContent='PAID';}
-          totalPaid+=donAmt; done++;
-          if(done===n){
-            document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);
-            document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);
-            document.getElementById('rt_loadingPayments').style.display='none';
-          }
-        }, 300); // small delay so all cards appear to load together
-        return;
-      }
-      const _sp = currentSession ? `session=${encodeURIComponent(currentSession.sessionToken)}` : `token=${encodeURIComponent(currentToken)}`;
-      fetch(`${APPS_SCRIPT_URL}?action=getPayments&${_sp}&invoiceNumber=${encodeURIComponent(r.invoiceNumber)}`)
-        .then(res=>res.json())
-        .then(data => {
-          const pmts = data.payments||[];
-          const paid = pmts.reduce((s,p)=>s+(p.amount||0),0);
-          const inv  = getInvoicedAmount(r);
-          const bal  = Math.max(0, inv-paid);
-          r._paidTotal=paid; r._outstandingTotal=bal;
-          const pEl=document.getElementById(`card-paid-${i}`);
-          const bEl=document.getElementById(`card-bal-${i}`);
-          const sEl=document.getElementById(`card-status-${i}`);
-          if(pEl) pEl.innerHTML=fmt(paid);
-          if(bEl) bEl.innerHTML=`<span style='color:${bal>0?'var(--deep-red)':'var(--success)'}'>${fmt(bal)}</span>`;
-          if(sEl){const sc=bal<=0?'status-paid':paid>0?'status-partial':'status-unpaid';const sl=bal<=0?'PAID':paid>0?'PARTIAL':'UNPAID';sEl.className=`status-badge ${sc}`;sEl.textContent=sl;}
-          totalPaid+=paid; totalOut+=bal; done++;
-          if(done===n){
-            document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);
-            document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);
-            document.getElementById('rt_loadingPayments').style.display='none';
-          }
-        })
-        .catch(()=>{
-          done++;
-          const pEl=document.getElementById(`card-paid-${i}`); if(pEl) pEl.innerHTML='—';
-          const bEl=document.getElementById(`card-bal-${i}`);  if(bEl) bEl.innerHTML='—';
-          if(done===n){
-            document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);
-            document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);
-            document.getElementById('rt_loadingPayments').style.display='none';
-          }
-          showErrorBanner('Could not load payment data — balances may be incomplete. Check your connection and refresh.');
-          if(done===n) document.getElementById('rt_loadingPayments').style.display='none';
-        });
+      // Server computed these — just display
+      const paid = r.collected   || 0;
+      const bal  = r.outstanding || 0;
+      const st   = r.status      || (bal<=0?'PAID':paid>0?'PARTIAL':'UNPAID');
+      r._paidTotal = paid; r._outstandingTotal = bal;
+      setTimeout(() => {
+        const pEl=document.getElementById(`card-paid-${i}`);
+        const bEl=document.getElementById(`card-bal-${i}`);
+        const sEl=document.getElementById(`card-status-${i}`);
+        if(pEl) pEl.innerHTML=fmt(paid);
+        if(bEl) bEl.innerHTML=`<span style='color:${bal<=0?"var(--success)":"var(--deep-red)"}'>${fmt(bal)}</span>`;
+        if(sEl){
+          const sc=st==='PAID'?'status-paid':st==='PARTIAL'?'status-partial':'status-unpaid';
+          sEl.className=`status-badge ${sc}`; sEl.textContent=st;
+        }
+        totalPaid+=paid; totalOut+=bal; done++;
+        if(done===n){
+          document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);
+          document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);
+        }
+      }, 50 * (i % 10)); // stagger slightly for visual effect
     });
   } else {
     document.getElementById('rt_sumPaid').textContent='—';
@@ -3228,16 +3206,18 @@ function refreshCards() {
 // DETAIL VIEW
 // ================================================================
 function getInvoicedAmount(inv) {
+  // Use pre-computed invoicedAmount if available — avoids double-discount
+  const precomputed = parseFloat(inv.invoicedAmount||0);
+  if (precomputed > 0) return precomputed;
+  // Otherwise compute from raw fields
   const disc  = parseFloat(inv['Discount']||inv.discount||0);
   const total = parseFloat(inv['Total Commitment']||inv.totalCommitment||0);
-  // Sponsor invoices store Total Commitment
   if (total > 0) return Math.max(0, total - disc);
-  // Sponsor invoices without booth — use Package Amount
-  const pkg = parseFloat(inv['Package Amount']||inv.packageAmount||0);
-  if (pkg > 0) return Math.max(0, pkg - disc);
-  // Vendor invoices use Booth Amount
-  const booth = parseFloat(inv['Booth Amount']||inv.boothAmount||0);
-  if (booth > 0) return Math.max(0, booth - disc);
+  // Use raw Booth Amount or Package Amount (not packageAmount which may already have discount applied)
+  const rawBooth = parseFloat(inv['Booth Amount']||0);
+  const rawPkg   = parseFloat(inv['Package Amount']||0);
+  const base = rawBooth || rawPkg;
+  if (base > 0) return Math.max(0, base - disc);
   // Final fallback: finalDue + advance
   return Math.max(0, (parseFloat(inv.finalDue||0)) + (parseFloat(inv['Advance Paid']||inv.advancePaid||0)));
 }
@@ -3344,7 +3324,7 @@ async function openDetail(idx) {
   }
 
   // Always fetch fresh from backend
-  await loadPayments(inv.invoiceNumber, getInvoicedAmount(inv));
+  await loadPayments(inv.invoiceNumber, inv.invoiced || inv.invoicedAmount || getInvoicedAmount(inv));
 }
 
 function closeDetail() {
@@ -3533,7 +3513,7 @@ async function submitPayment(withReceipt) {
       invoiceType:    inv.type,
       billTo:         inv.billTo,
       amount:         amt,
-      invoiceTotal:   getInvoicedAmount(inv),
+      invoiceTotal:   inv.invoiced || inv.invoicedAmount || getInvoicedAmount(inv),
       sponsAmount:    invSponsAmt,
       boothAmount:    invBoothAmt,
       fiscalYear:     inv['Fiscal Year']||inv.fiscalYear||'',
@@ -3924,24 +3904,10 @@ async function loadReports() {
     }
 
     // Enrich sponsors/vendors with payment data
-    const _rptParam = currentSession ? `session=${encodeURIComponent(currentSession.sessionToken)}` : `token=${encodeURIComponent(currentToken)}`;
-    const payFetches = all.map(inv =>
-      fetch(`${APPS_SCRIPT_URL}?action=getPayments&${_rptParam}&invoiceNumber=${encodeURIComponent(inv.invoiceNumber)}`)
-        .then(r=>r.json()).then(d=>d.payments||[]).catch(()=>[])
-    );
-    const allPayments = await Promise.all(payFetches);
-    all.forEach((inv,i) => {
-      const pmts       = allPayments[i];
-      const invTotal   = getInvoicedAmount(inv);
-      inv.collected    = pmts.reduce((s,p)=>s+(p.amount||0), 0);
-      inv.outstanding  = Math.max(0, invTotal - inv.collected);
-      inv.status       = inv.outstanding<=0.001 ? 'PAID' : inv.collected>0 ? 'PARTIAL' : 'UNPAID';
-      // Waterfall split totals for sponsor+booth invoices
-      if (inv.type === 'sponsor' && inv.hasBooth && pmts.length > 0) {
-        const lastPmt  = pmts[pmts.length - 1];
-        inv.sponsCollected = lastPmt.sponsTotal !== null ? lastPmt.sponsTotal : null;
-        inv.boothCollected = lastPmt.boothTotal !== null ? lastPmt.boothTotal : null;
-      }
+    // Server already enriched all invoices via enrichInvoice() in doGetReport
+    // invoiced/collected/outstanding/status are authoritative — no client fetching needed
+    all.forEach(inv => {
+      inv.invoiced = inv.invoiced || inv.invoicedAmount || 0;
     });
 
     // Donations are fully paid at point of recording
@@ -4086,17 +4052,33 @@ function renderTables(sponsors, vendors, donations) {
 
   // ── Sponsor table ────────────────────────────────────────────────────────
   document.getElementById('rp_spCount').textContent = `(${sponsors.length} invoice${sponsors.length===1?'':'s'})`;
+  const spTotals = rpTotals(sponsors);
+  document.getElementById('rp_sp_tot_inv').textContent = fmt(spTotals.invoiced);
+  document.getElementById('rp_sp_tot_col').textContent = fmt(spTotals.collected);
+  document.getElementById('rp_sp_tot_out').textContent = fmt(spTotals.outstanding);
+  const spBoothTot = sponsors.reduce((s,r)=>s+(r.hasBooth?(r.boothAmount||0):0),0);
+  document.getElementById('rp_sp_tot_booth').textContent = spBoothTot > 0 ? fmt(spBoothTot) : '—';
   document.getElementById('rp_spBody').innerHTML = sponsors.length === 0
     ? '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--text-muted);">No sponsorship invoices</td></tr>'
     : sponsors.map(r => rpTableRow(r, r['Package']||r.packageName||'—')).join('');
 
   // Vendor table
   document.getElementById('rp_vnCount').textContent = `(${vendors.length} invoice${vendors.length===1?'':'s'})`;
+  const vnTotals = rpTotals(vendors);
+  document.getElementById('rp_vn_tot_inv').textContent = fmt(vnTotals.invoiced);
+  document.getElementById('rp_vn_tot_col').textContent = fmt(vnTotals.collected);
+  document.getElementById('rp_vn_tot_out').textContent = fmt(vnTotals.outstanding);
   document.getElementById('rp_vnBody').innerHTML = vendors.length === 0
     ? '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-muted);">No vendor invoices</td></tr>'
     : vendors.map(r => rpTableRow(r, r['Event Name']||r.eventName||'—')).join('');
 
   // Donations table
+  const donAmtTot  = donations.reduce((s,r)=>s+(r.amount||0),0);
+  const donCorpTot = donations.reduce((s,r)=>s+(r.corpMatch===true||r.corpMatch==='true'?(r.corpMatchAmount||0):0),0);
+  const donValTot  = donations.reduce((s,r)=>s+(r.totalValue||r.finalDue||0),0);
+  document.getElementById('rp_don_tot_amt').textContent  = fmt(donAmtTot);
+  document.getElementById('rp_don_tot_corp').textContent = donCorpTot > 0 ? fmt(donCorpTot) : '—';
+  document.getElementById('rp_don_tot_val').textContent  = fmt(donValTot);
   document.getElementById('rp_donCount').textContent = `(${donations.length} receipt${donations.length===1?'':'s'})`;
   document.getElementById('rp_donBody').innerHTML = donations.length === 0
     ? '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text-muted);">No donations recorded</td></tr>'
@@ -4108,6 +4090,26 @@ function renderTables(sponsors, vendors, donations) {
         <td style="padding:10px 16px;text-align:right;color:var(--success);">${r.corpMatch==='true'||r.corpMatch===true?fmt(r.corpMatchAmount||0):'—'}</td>
         <td style="padding:10px 16px;text-align:right;font-weight:600;">${fmt(r.totalValue||r.finalDue||0)}</td>
       </tr>`).join('');
+}
+
+function rpTotals(rows) {
+  return {
+    invoiced:    rows.reduce((s,r) => s + (r.invoiced||r.invoicedAmount||0), 0),
+    collected:   rows.reduce((s,r) => s + (r.collected||0), 0),
+    outstanding: rows.reduce((s,r) => s + (r.outstanding||0), 0),
+  };
+}
+
+function rpTotalsRow(t, colspan, hasBooth) {
+  const boothTd = hasBooth ? '<td></td>' : '';
+  return `<tr style="border-top:2px solid var(--light-border);background:#F8F4F0;font-weight:600;">
+    <td colspan="${hasBooth ? 3 : 3}" style="padding:10px 16px;font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Total</td>
+    ${boothTd}
+    <td style="padding:10px 16px;text-align:right;font-weight:700;">${fmt(t.invoiced)}</td>
+    <td style="padding:10px 16px;text-align:right;font-weight:700;color:var(--success);">${fmt(t.collected)}</td>
+    <td style="padding:10px 16px;text-align:right;font-weight:700;color:var(--deep-red);">${fmt(t.outstanding)}</td>
+    <td></td>
+  </tr>`;
 }
 
 function rpTableRow(r, col3) {
@@ -4130,7 +4132,7 @@ function rpTableRow(r, col3) {
     <td style="padding:10px 16px;">${r.billTo||'—'}${splitDetail}</td>
     <td style="padding:10px 16px;color:var(--text-muted);">${col3}</td>
     ${r.type==='sponsor' ? `<td style="padding:10px 16px;text-align:right;">${boothCol}</td>` : ''}
-    <td style="padding:10px 16px;text-align:right;font-weight:600;">${fmt(r.finalDue||0)}</td>
+    <td style="padding:10px 16px;text-align:right;font-weight:600;">${fmt(r.invoiced||r.invoicedAmount||r.finalDue||0)}</td>
     <td style="padding:10px 16px;text-align:right;color:var(--success);font-weight:600;">${fmt(r.collected||0)}</td>
     <td style="padding:10px 16px;text-align:right;color:var(--deep-red);font-weight:600;">${fmt(r.outstanding||0)}</td>
     <td style="padding:10px 16px;text-align:center;"><span class="status-badge ${statusCls}">${r.status}</span></td>
