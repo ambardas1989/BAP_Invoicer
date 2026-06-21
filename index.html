@@ -1524,7 +1524,6 @@ async function verifyOtp() {
     }
 
     // Success — store session
-    console.log('[BAP] verifyOTP success, sessionToken:', data.sessionToken ? data.sessionToken.slice(0,8)+'...' : 'MISSING');
     if (!data.sessionToken) {
       document.getElementById('mfa_otpError').textContent = 'Server error: no session token returned';
       document.getElementById('mfa_otpError').style.display = '';
@@ -1540,7 +1539,6 @@ async function verifyOtp() {
       maskDonorNames: data.maskDonorNames,
       defaultCc:      data.defaultCc || '',
     });
-    console.log('[BAP] session saved, currentSession:', currentSession ? 'YES' : 'NO');
     currentDisplayName    = data.displayName;
     currentIsAdmin        = data.isAdmin;
     if (data.maskDonorNames !== undefined) CFG.maskDonorName = data.maskDonorNames;
@@ -1551,15 +1549,12 @@ async function verifyOtp() {
     btn.disabled  = false;
 
     // Close modal and connect
-    console.log('[BAP] About to close modal, currentSession:', currentSession ? currentSession.sessionToken.slice(0,8) : 'NULL');
     closeTokenModal();
-    console.log('[BAP] After closeTokenModal, currentSession:', currentSession ? currentSession.sessionToken.slice(0,8) : 'NULL');
     setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}`);
 
   } catch(e) {
     btn.innerHTML = 'Verify →';
     btn.disabled  = false;
-    console.error('[BAP] verifyOtp EXCEPTION:', e);
     const msg = e.message.includes('fetch') || e.message.includes('Failed')
       ? 'Network error — please check connection and try again.'
       : 'Verification failed: ' + e.message;
@@ -1580,7 +1575,6 @@ async function verifyOtp() {
       document.getElementById('vn_invNumber').value = data2.nextVN;
     }
   } catch(e2) {
-    console.warn('[BAP] nextNumber failed after login:', e2.message);
     generateLocalNumbers();
   }
 }
@@ -2691,11 +2685,9 @@ async function doSearch(loadAll=false) {
   closeDetail();
 
   try {
-    console.log('[BAP] doSearch — currentSession:', currentSession ? currentSession.sessionToken.slice(0,8)+'...' : 'NULL', '| currentToken:', currentToken ? 'set' : 'empty');
     const sessionParam = currentSession ? `&session=${encodeURIComponent(currentSession.sessionToken)}` : `&token=${encodeURIComponent(currentToken)}`;
     const url = `${APPS_SCRIPT_URL}?action=search${sessionParam}&q=${encodeURIComponent(q)}&type=${type}&loadAll=${loadAll?'1':'0'}`;
     const res = await fetch(url);
-    console.log('[BAP] search response status:', res.status);
     const data = await res.json();
     if (data.error) { document.getElementById('rt_searchStatus').textContent='⚠ '+data.error; return; }
     rtResults = data.results || [];
@@ -2733,10 +2725,25 @@ async function renderResults(results, q) {
   renderCards(results);
 
   // Fetch payments per card — each updates its own DOM when ready
-  if (hasBackend() && currentToken) {
+  if (hasBackend() && (currentSession || currentToken)) {
     let totalPaid=0, totalOut=0, done=0, n=results.length;
     results.forEach((r,i) => {
-      fetch(`${APPS_SCRIPT_URL}?action=getPayments&token=${encodeURIComponent(currentToken)}&invoiceNumber=${encodeURIComponent(r.invoiceNumber)}`)
+      // Donations are fully paid at point of recording — no payment log needed
+      if (r.type === 'donation') {
+        const donAmt = parseFloat(r.totalValue || r.amount || 0);
+        r._paidTotal = donAmt; r._outstandingTotal = 0;
+        const pEl=document.getElementById(`card-paid-${i}`);
+        const bEl=document.getElementById(`card-bal-${i}`);
+        const sEl=document.getElementById(`card-status-${i}`);
+        if(pEl) pEl.innerHTML=fmt(donAmt);
+        if(bEl) bEl.innerHTML=`<span style='color:var(--success)'>${fmt(0)}</span>`;
+        if(sEl){sEl.className='status-badge status-paid';sEl.textContent='PAID';}
+        totalPaid+=donAmt; done++;
+        if(done===n){document.getElementById('rt_sumPaid').textContent=fmt(totalPaid);document.getElementById('rt_sumOutstanding').textContent=fmt(totalOut);}
+        return;
+      }
+      const _sp = currentSession ? `session=${encodeURIComponent(currentSession.sessionToken)}` : `token=${encodeURIComponent(currentToken)}`;
+      fetch(`${APPS_SCRIPT_URL}?action=getPayments&${_sp}&invoiceNumber=${encodeURIComponent(r.invoiceNumber)}`)
         .then(res=>res.json())
         .then(data => {
           const pmts = data.payments||[];
@@ -2771,6 +2778,8 @@ function renderCards(results) {
   el.innerHTML = results.map((r,i) => {
     const badge = r.type==='sponsor'
       ? '<span class="rc-type sponsor">Sponsorship</span>'
+      : r.type==='donation'
+      ? '<span class="rc-type" style="background:#E8F5E9;color:#2E7D52;">Donation</span>'
       : '<span class="rc-type vendor">Vendor</span>';
     const meta = [r['Event Name']||r.eventName, r['Fiscal Year']||r.fiscalYear].filter(Boolean).join(' · ');
     // Format date cleanly
