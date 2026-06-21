@@ -459,7 +459,6 @@
     </div>
   </div>
 
-  
   <div class="card">
     <div class="card-title">Booth Deliverables</div>
     <div class="form-row" style="margin-bottom:16px;">
@@ -952,20 +951,43 @@
 <!-- Token modal -->
 <div class="modal-overlay" id="tokenModal">
   <div class="modal token-modal">
-    <div class="modal-header">
-      <h2>🔑 Access Token</h2>
-      <button class="modal-close" id="tokenCloseBtn" onclick="closeTokenModal()" style="display:none;">×</button>
-    </div>
-    <div class="modal-body">
-      <p>Enter your personal access token to connect to the invoice log. Each team member has their own token — keep it private.</p>
-      <div class="token-input-wrap">
-        <input type="password" id="tokenInput" placeholder="your_token_here" onkeydown="if(event.key==='Enter')saveToken()">
-        <button class="token-eye" onclick="toggleTokenEye()" id="tokenEyeBtn" title="Show/hide token">👁</button>
+    <!-- Step 1: Enter token -->
+    <div id="mfa_step1">
+      <div class="modal-header">
+        <h2>🔑 Sign In</h2>
+        <button class="modal-close" id="tokenCloseBtn" onclick="closeTokenModal()" style="display:none;">×</button>
       </div>
-      <div class="token-error" id="tokenError">Invalid token. Please check with your admin.</div>
+      <div class="modal-body">
+        <p id="mfa_step1_hint">Enter your personal access token.</p>
+        <div class="token-input-wrap">
+          <input type="password" id="tokenInput" placeholder="your_token_here" onkeydown="if(event.key==='Enter')saveToken()">
+          <button class="token-eye" onclick="toggleTokenEye()" id="tokenEyeBtn" title="Show/hide token">👁</button>
+        </div>
+        <div class="token-error" id="tokenError">Invalid token. Please check with your admin.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="mfa_sendOtpBtn" onclick="saveToken()">Connect →</button>
+      </div>
     </div>
-    <div class="modal-actions">
-      <button class="btn btn-primary" onclick="saveToken()">Connect →</button>
+    <!-- Step 2: Enter OTP (shown after token validated) -->
+    <div id="mfa_step2" style="display:none;">
+      <div class="modal-header">
+        <h2>📧 Enter OTP</h2>
+      </div>
+      <div class="modal-body">
+        <p id="mfa_otpHint" style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">OTP sent to your email</p>
+        <input type="text" id="mfa_otpInput" placeholder="6-digit code"
+          maxlength="6" inputmode="numeric" pattern="[0-9]*"
+          style="width:100%;text-align:center;font-size:24px;letter-spacing:8px;padding:12px;border:1.5px solid var(--light-border);border-radius:8px;box-sizing:border-box;font-family:'Inter',sans-serif;"
+          onkeydown="if(event.key==='Enter')verifyOtp()">
+        <div style="font-size:12px;color:var(--text-muted);margin-top:8px;text-align:center;" id="mfa_otpTimer"></div>
+        <div class="token-error" id="mfa_otpError" style="display:none;"></div>
+      </div>
+      <div class="modal-actions" style="display:flex;gap:10px;">
+        <button class="btn" onclick="mfaBackToStep1()" style="background:var(--cream);color:var(--navy);border:1.5px solid var(--light-border);">← Back</button>
+        <button class="btn btn-primary" id="mfa_verifyBtn" onclick="verifyOtp()">Verify →</button>
+        <button class="btn" id="mfa_resendBtn" onclick="mfaResendOtp()" style="background:none;color:var(--saffron);border:none;font-size:12px;cursor:pointer;padding:0;">Resend OTP</button>
+      </div>
     </div>
   </div>
 </div>
@@ -976,11 +998,19 @@
 // ================================================================
 // CONFIGURATION
 // ================================================================
+// DEPLOYMENT SETTINGS — change these to configure the app
 // ================================================================
-// DEPLOYMENT SETTINGS — the only two lines you need to change per environment
-// ================================================================
-const APPS_SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbzIxtP8UP0wG5obpKWpeEO1_YowbT6erYJpCwXZpanIQR0XQS7j4ve63MAuLZsVucTq3g/exec';  // paste your deployed Apps Script URL here
-const AUTH_MODE_CLIENT = 'oauth';  // 'token' = static token login · 'oauth' = Google account login
+const APPS_SCRIPT_URL    = 'https://script.google.com/macros/s/AKfycbzIxtP8UP0wG5obpKWpeEO1_YowbT6erYJpCwXZpanIQR0XQS7j4ve63MAuLZsVucTq3g/exec'; // paste your deployed Apps Script URL here
+
+// MFA_ENABLED — controlled server-side in appScript.js (SECTION 2)
+// The client reads this from the server on every login attempt
+// Cannot be bypassed by editing this file
+let MFA_ENABLED_CLIENT = false; // will be set by server response
+
+// MASK_DONOR_NAMES — controlled server-side in appScript.js (SECTION 3)
+// Cannot be changed from the HTML file — fetched from server on login
+
+const AUTH_MODE_CLIENT   = 'token'; // internal — do not change
 // ================================================================
 
 // ── Core utilities — defined early so all code can use them ─────────────────
@@ -1019,17 +1049,32 @@ function maskEmail(email) {
   return maskedLocal + '@' + maskedDom;
 }
 
+// Shows readonly CC info in email modals when DEFAULT_CC_EMAIL is set server-side
+function showDefaultCcRow(prefix) {
+  const cc   = CFG.defaultCcEmail || '';
+  const row  = document.getElementById(prefix + '_defaultCcRow');
+  const disp = document.getElementById(prefix + '_defaultCcDisplay');
+  if (row && disp) { row.style.display = cc ? '' : 'none'; if (cc) disp.textContent = cc; }
+}
+
+// Updates token modal UI after server confirms MFA is required
+function updateModalForMFAMode(mfaRequired) {
+  const hint = document.getElementById('mfa_step1_hint');
+  const btn  = document.getElementById('mfa_sendOtpBtn');
+  if (hint) hint.textContent = mfaRequired
+    ? 'Enter your personal access token. An OTP will be sent to your registered email.'
+    : 'Enter your personal access token to connect.';
+  if (btn) btn.textContent = mfaRequired ? 'Send OTP →' : 'Connect →';
+}
+
 // Returns true if the Apps Script backend is configured and reachable
 function hasBackend() {
   return APPS_SCRIPT_URL && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL';
 }
 
 // ================================================================
-// CONFIGURATION — all org-specific values in one place
-// To productize: move these to a settings screen
+// CONFIGURATION — org-specific values
 // ================================================================
-
-// ---- Organisation ----
 const CFG = {
   orgName:         'Bay Area Prabasi',
   orgAddress:      'PO Box 3613, Fremont, CA 94539',
@@ -1059,12 +1104,9 @@ const CFG = {
   invoiceThankYou: 'Thank you for your support!',
 
   // ---- Donor privacy ----
-  // maskDonorName: true  → donor names shown as "Am*** **s" in Retrieve and Reports
-  //                       emails shown as "am***@gmail.com"
-  //                       The actual name is always stored unmasked in the sheet
-  //                       Only affects display in the app UI — not the PDF receipt
-  // maskDonorName: false → full name shown everywhere
-  maskDonorName: true,
+  // Controlled server-side via appScript.js SECTION 3 — fetched on login
+  maskDonorName: false, // default false until server responds
+  defaultCcEmail: '', // set by server via whoAmI/verifyOTP — do not edit here
 
   // ---- Donation categories ----
   // Each: { label, amount } — amount is the suggested/standard amount (0 = custom)
@@ -1173,8 +1215,51 @@ function refreshVnInvoiceNumber() {
 // AUTH mode is set at the top of this file — see DEPLOYMENT SETTINGS above
 
 const TOKEN_KEY = 'bap_invoice_token';
-// In token mode: loaded from localStorage. In oauth mode: empty (Google handles identity).
+// Session stored in sessionStorage (clears on tab close — more secure than localStorage)
+const SESSION_KEY      = 'bap_session';
 let currentToken       = AUTH_MODE_CLIENT === 'token' ? (localStorage.getItem(TOKEN_KEY) || '') : '';
+let currentSession     = null;  // { sessionToken, displayName, isAdmin, expires }
+
+function loadStoredSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (new Date() > new Date(s.expires)) {
+      sessionStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return s;
+  } catch(e) { return null; }
+}
+
+function saveSession(s) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  currentSession = s;
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+  currentSession = null;
+}
+
+function getBrowserFingerprint() {
+  // Simple browser fingerprint — not cryptographic, just a reasonable bind
+  const data = [
+    navigator.userAgent,
+    navigator.language,
+    screen.width + 'x' + screen.height,
+    new Date().getTimezoneOffset(),
+    navigator.hardwareConcurrency || 0,
+  ].join('|');
+  // Simple hash
+  let hash = 0;
+  for (let i = 0; i < data.length; i++) {
+    hash = ((hash << 5) - hash) + data.charCodeAt(i);
+    hash |= 0;
+  }
+  return 'fp_' + Math.abs(hash).toString(36);
+}
 let currentDisplayName = '';
 let currentIsAdmin     = false;
 let tokenModalIsChange = false;
@@ -1203,19 +1288,40 @@ function rateLimitedFetch(url, opts, minGapMs = 800) {
     return Promise.reject(new Error('Please wait a moment before trying again'));
   }
   _lastFetchTime = now;
+
+  // Inject session token into request if MFA enabled
+  if (MFA_ENABLED_CLIENT && currentSession) {
+    if (opts && opts.method === 'POST' && opts.body) {
+      try {
+        const body = JSON.parse(opts.body);
+        body.session = currentSession.sessionToken;
+        body.fp      = getBrowserFingerprint();
+        opts = { ...opts, body: JSON.stringify(body) };
+      } catch(e) { /* leave as-is */ }
+    } else if (!opts || opts.method !== 'POST') {
+      // GET — append session to URL
+      const sep = url.includes('?') ? '&' : '?';
+      url = url + sep + 'session=' + encodeURIComponent(currentSession.sessionToken)
+                + '&fp=' + encodeURIComponent(getBrowserFingerprint());
+    }
+  }
   return fetch(url, opts);
 }
 
 function showTokenModal(isChange) {
-  // In oauth mode the token modal never shows — Google login handles auth
-  if (AUTH_MODE_CLIENT === 'oauth') {
-    setStatus('error', 'Access denied — sign in with your Google account');
-    return;
-  }
   tokenModalIsChange = isChange;
   document.getElementById('tokenInput').value = '';
   document.getElementById('tokenError').classList.remove('show');
-  document.getElementById('tokenCloseBtn').style.display = isChange ? 'flex' : 'none';
+  // Show X if: explicitly changing token OR already have a valid session (re-auth after expiry)
+  // Hide X if: fresh first login with no session — user must log in to use app
+  const hasSession = !!(currentSession || currentDisplayName);
+  document.getElementById('tokenCloseBtn').style.display = (isChange || hasSession) ? 'flex' : 'none';
+  // Update hint text and button based on MFA mode
+  const hint = document.getElementById('mfa_step1_hint');
+  const btn  = document.getElementById('mfa_sendOtpBtn');
+  // Text updated after server responds — default is generic
+  if (hint) hint.textContent = 'Enter your personal access token to sign in.';
+  if (btn)  btn.textContent  = 'Continue →';
   document.getElementById('tokenModal').classList.add('open');
   setTimeout(()=>document.getElementById('tokenInput').focus(), 100);
 }
@@ -1231,34 +1337,210 @@ function toggleTokenEye() {
   else { inp.type = 'password'; btn.textContent = '👁'; }
 }
 
-function saveToken() {
+// ── MFA flow ─────────────────────────────────────────────────────────────
+let _mfaOtpTimer = null;
+
+async function saveToken() {
   const val = document.getElementById('tokenInput').value.trim();
-  if (!val) return;
+  if (!val) { document.getElementById('tokenError').classList.add('show'); return; }
   currentToken = val;
   localStorage.setItem(TOKEN_KEY, val);
-  closeTokenModal();
-  initConnection();
-}
 
-function showOAuthDenied(email) {
-  // Shows a full-page access denied message for oauth mode
-  // The user is signed into Google but their email isn't in ALLOWED_EMAILS
-  setStatus('error', 'Access denied');
-  const container = document.querySelector('.container');
-  if (container) {
-    container.innerHTML = `
-      <div style="text-align:center;padding:60px 20px;">
-        <div style="font-size:48px;margin-bottom:16px;">🔒</div>
-        <h2 style="font-family:'Playfair Display',serif;color:var(--navy);margin-bottom:12px;">Access Denied</h2>
-        <p style="color:var(--text-muted);font-size:15px;max-width:400px;margin:0 auto 16px;">
-          Your Google account <strong>${email}</strong> is not authorised to use this app.
-        </p>
-        <p style="color:var(--text-muted);font-size:13px;">
-          Contact your administrator to be added to the access list.
-        </p>
-      </div>`;
+  if (!hasBackend()) {
+    closeTokenModal();
+    initConnection();
+    return;
+  }
+
+  const btn    = document.getElementById('mfa_sendOtpBtn');
+  const errEl  = document.getElementById('tokenError');
+  btn.innerHTML = '<span class="spin">⟳</span> Checking…';
+  btn.disabled  = true;
+  errEl.classList.remove('show');
+
+  const showErr = (msg) => {
+    btn.innerHTML = 'Continue →'; btn.disabled = false;
+    errEl.textContent = msg; errEl.classList.add('show');
+  };
+
+  try {
+    // Step 1 — validate token + get server settings (MFA, masking, etc.)
+    const r1   = await fetch(`${APPS_SCRIPT_URL}?action=whoAmI&token=${encodeURIComponent(val)}`);
+    const cfg  = await r1.json();
+
+    if (cfg.error) { showErr('Invalid token. Please check with your admin.'); return; }
+
+    // Server is authoritative — client cannot override these
+    MFA_ENABLED_CLIENT = cfg.mfaEnabled === true;
+    if (cfg.maskDonorNames !== undefined) CFG.maskDonorName = cfg.maskDonorNames;
+    CFG.defaultCcEmail = cfg.defaultCc || '';
+
+    if (!MFA_ENABLED_CLIENT) {
+      // No MFA — connect directly using whoAmI response
+      currentDisplayName = cfg.displayName || val;
+      currentIsAdmin     = cfg.isAdmin === true;
+      closeTokenModal();
+      setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}`);
+      try {
+        const r2 = await fetch(`${APPS_SCRIPT_URL}?action=nextNumber&token=${encodeURIComponent(val)}`);
+        const d2 = await r2.json();
+        if (d2.nextSP) { document.getElementById('sp_invNumber').value = d2.nextSP; document.getElementById('vn_invNumber').value = d2.nextVN; }
+      } catch(e) { generateLocalNumbers(); }
+      return;
+    }
+
+    // Step 2 — MFA required: request OTP
+    btn.innerHTML = 'Send OTP →'; btn.disabled = false;
+    updateModalForMFAMode(true);
+
+    const r2   = await fetch(`${APPS_SCRIPT_URL}?action=requestOTP&token=${encodeURIComponent(val)}`);
+    const data = await r2.json();
+
+    if (data.error) {
+      if (data.error === 'otp_too_soon') showErr(data.message || 'Please wait before requesting another OTP.');
+      else showErr(data.message || data.error);
+      return;
+    }
+
+    // OTP sent — show step 2
+    document.getElementById('mfa_step1').style.display = 'none';
+    document.getElementById('mfa_step2').style.display = '';
+    document.getElementById('mfa_otpHint').textContent =
+      `OTP sent to ${data.maskedEmail} · expires in ${Math.floor((data.expiresIn||600)/60)} min`;
+    document.getElementById('mfa_otpInput').value = '';
+    document.getElementById('mfa_otpError').style.display = 'none';
+    setTimeout(() => document.getElementById('mfa_otpInput').focus(), 100);
+    startOtpTimer(data.expiresIn || 600);
+
+  } catch(err) {
+    showErr('Connection failed — check Apps Script URL and deployment settings.');
   }
 }
+
+function startOtpTimer(seconds) {
+  if (_mfaOtpTimer) clearInterval(_mfaOtpTimer);
+  const timerEl = document.getElementById('mfa_otpTimer');
+  let remaining = seconds;
+  const update = () => {
+    const m = Math.floor(remaining / 60);
+    const s = remaining % 60;
+    timerEl.textContent = `OTP expires in ${m}:${String(s).padStart(2,'0')}`;
+    if (remaining <= 0) {
+      clearInterval(_mfaOtpTimer);
+      timerEl.textContent = 'OTP expired — please request a new one';
+      timerEl.style.color = 'var(--deep-red)';
+      document.getElementById('mfa_verifyBtn').disabled = true;
+    }
+    remaining--;
+  };
+  update();
+  _mfaOtpTimer = setInterval(update, 1000);
+}
+
+function mfaBackToStep1() {
+  if (_mfaOtpTimer) clearInterval(_mfaOtpTimer);
+  document.getElementById('mfa_step1').style.display = '';
+  document.getElementById('mfa_step2').style.display = 'none';
+  document.getElementById('mfa_sendOtpBtn').disabled = false;
+  document.getElementById('mfa_sendOtpBtn').innerHTML = 'Send OTP →';
+}
+
+async function mfaResendOtp() {
+  if (_mfaOtpTimer) clearInterval(_mfaOtpTimer);
+  document.getElementById('mfa_resendBtn').textContent = 'Sending…';
+  try {
+    const res  = await fetch(`${APPS_SCRIPT_URL}?action=requestOTP&token=${encodeURIComponent(currentToken)}`);
+    const data = await res.json();
+    if (data.error) {
+      document.getElementById('mfa_otpError').textContent = data.message || data.error;
+      document.getElementById('mfa_otpError').style.display = '';
+    } else {
+      document.getElementById('mfa_otpHint').textContent =
+        `New OTP sent to ${data.maskedEmail}`;
+      document.getElementById('mfa_otpError').style.display = 'none';
+      document.getElementById('mfa_verifyBtn').disabled = false;
+      startOtpTimer(data.expiresIn || 600);
+    }
+  } catch(e) {
+    document.getElementById('mfa_otpError').textContent = 'Resend failed: ' + e.message;
+    document.getElementById('mfa_otpError').style.display = '';
+  }
+  document.getElementById('mfa_resendBtn').textContent = 'Resend OTP';
+}
+
+async function verifyOtp() {
+  const otp = document.getElementById('mfa_otpInput').value.trim();
+  if (!otp || otp.length !== 6) {
+    document.getElementById('mfa_otpError').textContent = 'Enter the 6-digit code from your email';
+    document.getElementById('mfa_otpError').style.display = '';
+    return;
+  }
+
+  const btn = document.getElementById('mfa_verifyBtn');
+  btn.innerHTML = '<span class="spin">⟳</span> Verifying…';
+  btn.disabled  = true;
+  document.getElementById('mfa_otpError').style.display = 'none';
+
+  try {
+    const fp   = getBrowserFingerprint();
+    const res  = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      body:   JSON.stringify({ action: 'verifyOTP', token: currentToken, otp, fp })
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      btn.innerHTML = 'Verify →';
+      btn.disabled  = false;
+      const errEl = document.getElementById('mfa_otpError');
+      errEl.textContent = data.message || data.error;
+      errEl.style.display = '';
+      if (data.error === 'otp_locked' || data.error === 'otp_expired') {
+        // Force back to step 1
+        setTimeout(mfaBackToStep1, 2000);
+      }
+      return;
+    }
+
+    // Success — store session
+    if (_mfaOtpTimer) clearInterval(_mfaOtpTimer);
+    saveSession({
+      sessionToken: data.sessionToken,
+      displayName:  data.displayName,
+      isAdmin:      data.isAdmin,
+      expires:      data.expires,
+    });
+    currentDisplayName    = data.displayName;
+    currentIsAdmin        = data.isAdmin;
+    if (data.maskDonorNames !== undefined) CFG.maskDonorName = data.maskDonorNames;
+    CFG.defaultCcEmail    = data.defaultCc || '';
+
+    // Close modal and connect
+    closeTokenModal();
+    setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}`);
+
+    // Load invoice numbers
+    if (hasBackend()) {
+      const res2  = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=nextNumber&session=${encodeURIComponent(data.sessionToken)}`);
+      const data2 = await res2.json();
+      if (data2.nextSP) {
+        document.getElementById('sp_invNumber').value = data2.nextSP;
+        document.getElementById('vn_invNumber').value = data2.nextVN;
+      }
+    }
+
+    const changeBtn = document.querySelector('.sb-link');
+    if (changeBtn) changeBtn.style.display = '';
+
+  } catch(e) {
+    btn.innerHTML = 'Verify →';
+    btn.disabled  = false;
+    document.getElementById('mfa_otpError').textContent = 'Verification failed: ' + e.message;
+    document.getElementById('mfa_otpError').style.display = '';
+  }
+}
+
+
 
 // ================================================================
 // APPS SCRIPT CONNECTION
@@ -1279,46 +1561,48 @@ async function initConnection() {
     return;
   }
 
-  // OAuth mode: no token needed — Google session is the credential
-  // Token mode: require a saved token
-  if (AUTH_MODE_CLIENT === 'token' && !currentToken) {
+  // Check for existing valid session first
+  if (MFA_ENABLED_CLIENT) {
+    const stored = loadStoredSession();
+    if (stored) {
+      currentSession     = stored;
+      currentDisplayName = stored.displayName;
+      currentIsAdmin     = stored.isAdmin;
+      setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}`);
+      const res2  = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=nextNumber&session=${encodeURIComponent(stored.sessionToken)}`);
+      const data2 = await res2.json();
+      if (data2.nextSP) {
+        document.getElementById('sp_invNumber').value = data2.nextSP;
+        document.getElementById('vn_invNumber').value = data2.nextVN;
+      }
+      return;
+    }
+    // No valid session — require token + OTP
+    if (!currentToken) { showTokenModal(false); return; }
+    // Token saved but no session — re-auth required
     showTokenModal(false);
     return;
   }
 
+  // Non-MFA path — validate token directly via whoAmI
+  if (!currentToken) { showTokenModal(false); return; }
   setStatus('', 'Connecting…');
   try {
-    // whoAmI validates credential AND returns display name/role — single call
-    // In token mode: pass token in URL. In oauth mode: pass empty token (server reads Google session)
-    const tokenParam = AUTH_MODE_CLIENT === 'token' ? encodeURIComponent(currentToken) : '';
-    const res  = await fetch(`${APPS_SCRIPT_URL}?action=whoAmI&token=${tokenParam}`);
+    const res  = await fetch(`${APPS_SCRIPT_URL}?action=whoAmI&token=${encodeURIComponent(currentToken)}`);
     const data = await res.json();
-
-    if (data.error === 'invalid_token' || data.error === 'access_denied') {
-      if (AUTH_MODE_CLIENT === 'oauth') {
-        // Show access denied screen — their Google account isn't in the allowlist
-        showOAuthDenied(data.email || '');
-      } else {
-        setStatus('error', 'Invalid token');
-        document.getElementById('tokenError').classList.add('show');
-        showTokenModal(false);
-      }
+    if (data.error) {
+      setStatus('error', 'Invalid token');
+      localStorage.removeItem(TOKEN_KEY);
+      currentToken = '';
+      document.getElementById('tokenError').classList.add('show');
+      showTokenModal(false);
       return;
     }
-
-    // Auth succeeded — store identity
-    currentDisplayName = data.displayName || data.name || currentToken;
-    currentIsAdmin     = data.isAdmin === true;
-    // In oauth mode, update currentToken to email so it can be sent in subsequent requests
-    if (AUTH_MODE_CLIENT === 'oauth') currentToken = data.email || '';
-
+    currentDisplayName    = data.displayName || data.name || currentToken;
+    currentIsAdmin        = data.isAdmin === true;
+    if (data.maskDonorNames !== undefined) CFG.maskDonorName = data.maskDonorNames;
+    CFG.defaultCcEmail    = data.defaultCc || '';
     setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}`);
-
-    // Hide "Change token" link in oauth mode (Google manages auth)
-    const changeBtn = document.querySelector('.sb-link');
-    if (changeBtn) changeBtn.style.display = AUTH_MODE_CLIENT === 'oauth' ? 'none' : '';
-
-    // Fetch invoice numbers
     const res2  = await fetch(`${APPS_SCRIPT_URL}?action=nextNumber&token=${encodeURIComponent(currentToken)}`);
     const data2 = await res2.json();
     if (data2.nextSP) {
@@ -1326,7 +1610,9 @@ async function initConnection() {
       document.getElementById('vn_invNumber').value = data2.nextVN;
     }
   } catch(e) {
-    setStatus('error', 'Could not reach Google Sheets — check URL');
+    // CORS or network error — still let user in with local numbers
+    setStatus('', 'Working offline — invoice numbers generated locally');
+    currentDisplayName = currentToken;
     generateLocalNumbers();
   }
 }
@@ -1355,8 +1641,16 @@ async function logInvoice(type, num, data) {
     const body = {token:currentToken, type, invoiceNumber:num, ...data};
     const res = await rateLimitedFetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
     const result = await res.json();
-    if (result.error==='invalid_token') {
-      setStatus('error','Token rejected — please re-enter');
+    if (result.error==='invalid_token' || result.error==='session_required' || result.error==='session_invalid') {
+      setStatus('error','Session expired — please sign in again');
+      clearSession();
+      currentToken = '';
+      showTokenModal(false);
+      return {logged:false, driveLink:''};
+    }
+    if (result.error==='session_expired') {
+      setStatus('error','Session expired — please sign in again');
+      clearSession();
       showTokenModal(false);
       return {logged:false, driveLink:''};
     }
@@ -2193,6 +2487,7 @@ function openEmailModal(type) {
   document.getElementById('em_status').textContent     = '';
   document.getElementById('em_sendBtn').disabled       = false;
   document.getElementById('em_sendBtn').textContent    = '✉ Send Email';
+  showDefaultCcRow('em');
   document.getElementById('emailModal').classList.add('open');
 }
 
@@ -2990,6 +3285,7 @@ function openReceiptEmailModal() {
   document.getElementById('rem_sendBtn').textContent = '✉ Send Receipt';
   document.getElementById('rem_toError').style.display = 'none';
   document.getElementById('rem_ccError').style.display = 'none';
+  showDefaultCcRow('rem');
   document.getElementById('receiptEmailModal').classList.add('open');
 }
 
@@ -4051,8 +4347,6 @@ ${CFG.orgWebsite}`;
 
   // Mark as donation mode so sendEmail uses pre-generated PDF
   emailState.formType = 'donation';
-  emailState.formType     = false; // use emailPdfBase64 directly, not re-generate
-  emailState.formType = 'donation';
   document.getElementById('emailModal').classList.add('open');
 }
 
@@ -4124,8 +4418,11 @@ initConnection();
       <div class="form-group">
         <label>CC (comma-separated, optional)</label>
         <input type="text" id="em_ccEmails" placeholder="e.g. another@example.com, boss@biz.com">
-        <!-- <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">info@prabasi.org is always CC'd automatically.</div> -->
         <div id="em_ccError" style="font-size:11px;color:var(--deep-red);margin-top:3px;display:none;"></div>
+        <div id="em_defaultCcRow" style="display:none;margin-top:6px;padding:6px 10px;background:#F0F4FF;border-radius:6px;font-size:12px;color:#2A5BC8;">
+          📋 Always CC'd: <strong id="em_defaultCcDisplay"></strong>
+          <span style="color:var(--text-muted);font-size:11px;"> (set in Apps Script — read only)</span>
+        </div>
       </div>
       <div class="form-group">
         <label>Subject</label>
@@ -4161,8 +4458,11 @@ initConnection();
       <div class="form-group">
         <label>CC (comma-separated, optional)</label>
         <input type="text" id="rem_ccEmails" placeholder="e.g. another@example.com">
-        <!-- <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">info@prabasi.org is always CC'd automatically.</div> -->
         <div id="rem_ccError" style="font-size:11px;color:var(--deep-red);margin-top:3px;display:none;"></div>
+        <div id="rem_defaultCcRow" style="display:none;margin-top:6px;padding:6px 10px;background:#F0F4FF;border-radius:6px;font-size:12px;color:#2A5BC8;">
+          📋 Always CC'd: <strong id="rem_defaultCcDisplay"></strong>
+          <span style="color:var(--text-muted);font-size:11px;"> (set in Apps Script — read only)</span>
+        </div>
       </div>
       <div class="form-group">
         <label>Message (optional)</label>
