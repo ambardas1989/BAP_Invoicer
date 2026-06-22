@@ -2851,7 +2851,7 @@ async function _generatePDF(type){
   if(disc>0){
     y+=16;
     doc.setTextColor(107,122,147);doc.setFont('helvetica','normal');doc.text('Discount',tx,y);
-    doc.setTextColor(26,43,74);doc.setFont('helvetica','bold');doc.text('− '+fmt(disc),pw-m-10,y,{align:'right'});
+    doc.setTextColor(26,43,74);doc.setFont('helvetica','bold');doc.text('- '+fmt(disc),pw-m-10,y,{align:'right'});
   }
   y+=16;
   doc.setDrawColor(220,215,205);doc.line(tx,y,pw-m,y);y+=10;
@@ -2860,7 +2860,7 @@ async function _generatePDF(type){
   if(adv>0){
     y+=16;
     doc.setTextColor(107,122,147);doc.setFont('helvetica','normal');doc.text('Advance Paid',tx,y);
-    doc.setTextColor(46,125,82);doc.setFont('helvetica','bold');doc.text('− '+fmt(adv),pw-m-10,y,{align:'right'});
+    doc.setTextColor(46,125,82);doc.setFont('helvetica','bold');doc.text('- '+fmt(adv),pw-m-10,y,{align:'right'});
   }
   y+=12;doc.setFillColor(181,40,28);doc.roundedRect(tx-10,y,pw-m-tx+10,26,4,4,'F');
   doc.setTextColor(255,255,255);doc.setFontSize(11);doc.setFont('helvetica','bold');
@@ -3933,7 +3933,7 @@ function buildReceiptPdf(inv, payments, tag, isFull) {
     doc.setFont('helvetica','normal'); doc.setTextColor(107,122,147);
     doc.text('Advance Paid (at invoice)', tx, y);
     doc.setFont('helvetica','bold'); doc.setTextColor(46,125,82);
-    doc.text('− '+fmt(advAmt), pw-m-10, y, {align:'right'});
+    doc.text('- '+fmt(advAmt), pw-m-10, y, {align:'right'});
     y += 16;
   }
   // Show discount if non-zero
@@ -3941,7 +3941,7 @@ function buildReceiptPdf(inv, payments, tag, isFull) {
     doc.setFont('helvetica','normal'); doc.setTextColor(107,122,147);
     doc.text('Discount', tx, y);
     doc.setFont('helvetica','bold'); doc.setTextColor(46,125,82);
-    doc.text('− '+fmt(discAmt), pw-m-10, y, {align:'right'});
+    doc.text('- '+fmt(discAmt), pw-m-10, y, {align:'right'});
     y += 16;
   }
   // Divider
@@ -3956,7 +3956,7 @@ function buildReceiptPdf(inv, payments, tag, isFull) {
   doc.setFont('helvetica','normal'); doc.setTextColor(107,122,147);
   doc.text('Payments Recorded', tx, y);
   doc.setFont('helvetica','bold'); doc.setTextColor(46,125,82);
-  doc.text('− '+fmt(totalPaid), pw-m-10, y, {align:'right'});
+  doc.text('- '+fmt(totalPaid), pw-m-10, y, {align:'right'});
   y += 14;
 
   // Outstanding / Paid in full band
