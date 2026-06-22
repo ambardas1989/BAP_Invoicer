@@ -1044,14 +1044,10 @@
     <div class="modal-header">
       <h2>🗑 Delete Invoice</h2>
     </div>
-    <div class="modal-body">
-      <p id="deleteInvMsg" style="font-size:14px;margin-bottom:12px;"></p>
-      <div style="background:#FFF0F0;border-radius:8px;padding:10px 14px;font-size:13px;color:var(--deep-red);">
-        <strong>This will permanently delete:</strong>
-        <ul style="margin:6px 0 0 16px;padding:0;">
-          <li>The invoice record from the sheet</li>
-          <li>All payment records for this invoice</li>
-        </ul>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
+      <div id="deleteInvMsg" style="font-size:14px;"></div>
+      <div style="background:#FFF0F0;border-radius:8px;padding:8px 12px;font-size:12px;color:var(--deep-red);margin-top:4px;">
+        ⚠ This cannot be undone.
       </div>
     </div>
     <div class="modal-actions" style="gap:10px;">
@@ -1252,8 +1248,12 @@ async function checkDuplicatesBeforeGenerate(type, name, email, onProceed) {
     // Show modal
     _dupCheckCallback = onProceed;
     const typeLabel = type === 'sponsor' ? 'sponsor' : 'vendor';
+    // Determine how each match was found — show appropriate message
+    const byEmail = data.duplicates.every(d => d.matchedBy === 'email');
+    const byBoth  = data.duplicates.some(d => d.matchedBy === 'email') && data.duplicates.some(d => d.matchedBy === 'name');
+    const matchDesc = byEmail ? `email "${email}"` : byBoth ? `name or email` : `name "${name}"`;
     document.getElementById('dupCheckMsg').textContent =
-      `Found ${data.duplicates.length} existing invoice(s) matching "${name}" — are you sure you want to create a new one?`;
+      `Found ${data.duplicates.length} existing invoice(s) matching by ${matchDesc} — are you sure you want to create a new one?`;
 
     document.getElementById('dupCheckBody').innerHTML = data.duplicates.map(d => {
       const statusCls = d.status==='PAID'?'status-paid':d.status==='PARTIAL'?'status-partial':'status-unpaid';
@@ -1312,13 +1312,76 @@ function dupGenerateAnyway() {
 // ── Delete invoice (admin only) ───────────────────────────────────────────────
 let _deleteInvTarget = null;
 
-function showDeleteInvoice(inv) {
+async function showDeleteInvoice(inv) {
   if (!currentIsAdmin) { showToast('⚠ Admin access required', '#B5281C'); return; }
   _deleteInvTarget = inv;
-  document.getElementById('deleteInvMsg').innerHTML =
-    `Delete invoice <strong>${escHtml(inv.invoiceNumber)}</strong> for <strong>${escHtml(inv.billTo||'')}</strong>?<br>
-     <span style="color:var(--text-muted);font-size:13px;">This cannot be undone.</span>`;
+
+  // Fetch payment records first so user knows exactly what will be deleted
+  const sp = currentSession ? `session=${encodeURIComponent(currentSession.sessionToken)}` : `token=${encodeURIComponent(currentToken)}`;
+  let paymentsHtml = '<tr><td colspan="4" style="padding:8px;color:var(--text-muted);font-style:italic;">Loading payments…</td></tr>';
+
+  document.getElementById('deleteInvMsg').innerHTML = `
+    <div style="margin-bottom:12px;">
+      Delete invoice <strong>${escHtml(inv.invoiceNumber)}</strong> for <strong>${escHtml(inv.billTo||'')}</strong>?
+    </div>
+    <div style="margin-bottom:8px;font-size:13px;font-weight:600;color:var(--navy);">Records that will be permanently deleted:</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px;">
+      <thead>
+        <tr style="background:#F8F4F0;">
+          <th style="padding:7px 10px;text-align:left;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Type</th>
+          <th style="padding:7px 10px;text-align:left;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Date</th>
+          <th style="padding:7px 10px;text-align:left;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Method</th>
+          <th style="padding:7px 10px;text-align:right;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Amount</th>
+        </tr>
+      </thead>
+      <tbody id="deleteInvPayBody">
+        <tr><td colspan="4" style="padding:8px;color:var(--text-muted);font-style:italic;">Loading…</td></tr>
+      </tbody>
+    </table>`;
+
   document.getElementById('deleteInvModal').style.display = 'flex';
+
+  // Now fetch and populate payments
+  try {
+    const res  = await fetch(`${APPS_SCRIPT_URL}?action=getPayments&${sp}&invoiceNumber=${encodeURIComponent(inv.invoiceNumber)}`);
+    const data = await res.json();
+    const pmts = data.payments || [];
+    const tbody = document.getElementById('deleteInvPayBody');
+    if (!tbody) return;
+
+    // Invoice row first
+    const invDate = inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+    let rows = `<tr style="border-bottom:1px solid var(--light-border);background:#FFF8F8;">
+      <td style="padding:7px 10px;font-weight:600;color:var(--deep-red);">Invoice record</td>
+      <td style="padding:7px 10px;">${invDate}</td>
+      <td style="padding:7px 10px;color:var(--text-muted);">${escHtml(inv.packageName||inv.boothType||'—')}</td>
+      <td style="padding:7px 10px;text-align:right;font-weight:600;">${fmt(inv.invoiced||inv.invoicedAmount||0)}</td>
+    </tr>`;
+
+    if (pmts.length === 0) {
+      rows += `<tr><td colspan="4" style="padding:7px 10px;color:var(--text-muted);font-style:italic;">No payment records</td></tr>`;
+    } else {
+      rows += pmts.map(p => {
+        const d = p.timestamp ? new Date(p.timestamp).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+        return `<tr style="border-bottom:1px solid var(--light-border);">
+          <td style="padding:7px 10px;color:var(--deep-red);">Payment record</td>
+          <td style="padding:7px 10px;">${d}</td>
+          <td style="padding:7px 10px;color:var(--text-muted);">${escHtml(p.method||'—')}</td>
+          <td style="padding:7px 10px;text-align:right;">${fmt(p.amount||0)}</td>
+        </tr>`;
+      }).join('');
+      // Total row
+      const totalPaid = pmts.reduce((s,p)=>s+(p.amount||0),0);
+      rows += `<tr style="background:#F8F4F0;font-weight:600;">
+        <td colspan="3" style="padding:7px 10px;font-size:12px;color:var(--text-muted);">${pmts.length} payment record(s) total</td>
+        <td style="padding:7px 10px;text-align:right;">${fmt(totalPaid)}</td>
+      </tr>`;
+    }
+    tbody.innerHTML = rows;
+  } catch(e) {
+    const tbody = document.getElementById('deleteInvPayBody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="4" style="padding:8px;color:var(--text-muted);">Could not load payment records</td></tr>`;
+  }
 }
 
 async function confirmDeleteInvoice() {
