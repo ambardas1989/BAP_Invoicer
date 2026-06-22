@@ -435,7 +435,7 @@
   <div class="actions">
     <button class="btn btn-preview" onclick="showPreview('sponsor')">👁 Preview Invoice</button>
     <button class="btn btn-primary btn-download" onclick="generatePDF('sponsor')">⬇ Download PDF</button>
-    <button class="btn btn-primary" style="background:#2E7D52;" onclick="openEmailModal('sponsor')">✉ Mail to Business</button>
+    <button class="btn btn-primary" style="background:#2E7D52;" onclick="checkDupThenEmail('sponsor')">✉ Mail to Business</button>
     <button class="btn btn-secondary" onclick="resetForm('sponsor')">↺ Reset</button>
   </div>
 </div>
@@ -561,7 +561,7 @@
   <div class="actions">
     <button class="btn btn-preview" onclick="showPreview('vendor')">👁 Preview Invoice</button>
     <button class="btn btn-primary btn-download" onclick="generatePDF('vendor')">⬇ Download PDF</button>
-    <button class="btn btn-primary" style="background:#2E7D52;" onclick="openEmailModal('vendor')">✉ Mail to Business</button>
+    <button class="btn btn-primary" style="background:#2E7D52;" onclick="checkDupThenEmail('vendor')">✉ Mail to Business</button>
     <button class="btn btn-secondary" onclick="resetForm('vendor')">↺ Reset</button>
   </div>
 </div>
@@ -933,7 +933,6 @@
           </thead>
           <tbody id="rp_spBody"></tbody>
         </table>
-          </div>
       </div>
     </div>
     <!-- Vendor table -->
@@ -964,7 +963,6 @@
           </thead>
           <tbody id="rp_vnBody"></tbody>
         </table>
-          </div>
       </div>
     </div>
   </div>
@@ -995,7 +993,6 @@
           </thead>
           <tbody id="rp_donBody"></tbody>
         </table>
-          </div>
       </div>
     </div>
     <div id="rp_empty" style="display:none;text-align:center;padding:40px;color:var(--text-muted);">
@@ -1291,6 +1288,14 @@ function dupCancel() {
   document.getElementById('dupCheckModal').style.display = 'none';
   _dupCheckCallback = null;
   // Stay on current form — user can edit
+}
+
+async function checkDupThenEmail(type) {
+  const isV   = type === 'vendor';
+  const name  = document.getElementById(isV?'vn_billTo':'sp_billTo').value.trim();
+  const email = document.getElementById(isV?'vn_contactEmail':'sp_contactEmail').value.trim();
+  await new Promise(resolve => { checkDuplicatesBeforeGenerate(type, name, email, resolve); });
+  openEmailModal(type);
 }
 
 function dupGoToRetrieve() {
