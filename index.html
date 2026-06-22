@@ -1034,7 +1034,8 @@
       <p style="font-size:12px;color:var(--text-muted);margin-top:14px;">You can copy an invoice number and go to Retrieve to record a payment, or continue to generate a new invoice.</p>
     </div>
     <div class="modal-actions" style="gap:10px;">
-      <button class="btn" onclick="dupGoToRetrieve()" style="background:var(--cream);color:var(--navy);border:1.5px solid var(--light-border);">Go to Retrieve →</button>
+      <button class="btn" onclick="dupCancel()" style="background:var(--cream);color:var(--navy);border:1.5px solid var(--light-border);">Cancel</button>
+      <button class="btn" onclick="dupGoToRetrieve()" style="background:none;color:var(--navy);border:1.5px solid var(--light-border);">Go to Retrieve →</button>
       <button class="btn btn-primary" id="dupGenerateBtn" onclick="dupGenerateAnyway()">Generate New Invoice</button>
     </div>
   </div>
@@ -1284,6 +1285,12 @@ async function checkDuplicatesBeforeGenerate(type, name, email, onProceed) {
 
 function copyInvNum(num) {
   navigator.clipboard.writeText(num).then(() => showToast('✓ Copied: ' + num));
+}
+
+function dupCancel() {
+  document.getElementById('dupCheckModal').style.display = 'none';
+  _dupCheckCallback = null;
+  // Stay on current form — user can edit
 }
 
 function dupGoToRetrieve() {
@@ -2201,7 +2208,8 @@ function updateSpCalc(){
   const booths   = hasBooth ? getBoothDetails() : [];
   const boothAmt = booths.reduce((s,b) => s + (b.amount||0), 0);
   // Package IS the total commitment — booth is carved out, not added
-  const sponsAmt = Math.max(0, pkg - boothAmt);
+  const invoicedAmt = Math.max(0, pkg - disc);
+  const sponsAmt = Math.max(0, invoicedAmt - boothAmt);
   const invoiced = Math.max(0, pkg - disc);
   document.getElementById('sp_displayDue').textContent = fmt(Math.max(0, invoiced - adv));
   const boothTotalEl  = document.getElementById('sp_displayBoothTotal');
@@ -2426,10 +2434,11 @@ function buildSpHTML(){
   const hasBooth   = document.getElementById('sp_hasBooth').checked;
   const booths     = hasBooth ? getBoothDetails() : [];
   const boothAmt   = booths.reduce((s,b)=>s+(b.amount||0),0);
-  // Package IS total — no additive total
   const totalAmt   = amt; // amt = pkg = total commitment
-  const sponsAmt   = Math.max(0, amt - boothAmt);
-  const invoiced   = Math.max(0,totalAmt-disc); const due=Math.max(0,invoiced-adv);
+  const invoiced   = Math.max(0, totalAmt - disc);
+  // Sponsorship portion = invoiced (after discount) - booth allocation
+  const sponsAmt   = Math.max(0, invoiced - boothAmt);
+  const due        = Math.max(0, invoiced - adv);
   const benefits   = getActiveBenefitsText();
   const notes      = document.getElementById('sp_notes').value;
   const spDescLine = [sponsorType,spEventName,period].filter(Boolean).join(' · ');
@@ -2740,7 +2749,7 @@ async function _generatePDF(type){
     const booths   = hasBooth ? getBoothDetails() : [];
     if (booths.length > 0) {
       const boothTotal = booths.reduce((s,b)=>s+(b.amount||0),0);
-      const sponsPortion = Math.max(0, amt - boothTotal);
+      const sponsPortion = Math.max(0, (amt - disc) - boothTotal); // discount before split
       // Sponsorship portion row
       doc.text('Sponsorship Portion',tx,y);
       doc.setTextColor(26,43,74);doc.setFont('helvetica','bold');
@@ -4314,7 +4323,7 @@ function rpTotals(rows, sponsorMode) {
 function rpTableRow(r, col3) {
   const statusCls = r.status==='PAID' ? 'status-paid' : r.status==='PARTIAL' ? 'status-partial' : 'status-unpaid';
   const hasSplit     = r.type==='sponsor' && r.hasBooth && (r.boothAmount||0) > 0;
-  const sponsPortion = hasSplit ? Math.max(0, (r.finalDue||0) - (r.boothAmount||0)) : null;
+  const sponsPortion = hasSplit ? Math.max(0, (r.invoiced||r.finalDue||0) - (r.boothAmount||0)) : null;
   const splitDetail  = hasSplit
     ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Spons ${fmt(sponsPortion)} · Booth ${fmt(r.boothAmount)}</div>`
     : '';
