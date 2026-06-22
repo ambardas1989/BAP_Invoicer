@@ -613,6 +613,10 @@
   <div id="rt_detail" style="display:none;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding:0 4px;">
     <button class="detail-back" onclick="closeDetail()" style="margin-bottom:0;">← Back to results</button>
+    <button id="rt_deleteBtn" onclick="showDeleteInvoice(rtCurrentInvoice)"
+      style="display:none;background:none;border:1.5px solid var(--deep-red);color:var(--deep-red);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-family:inherit;margin-left:auto;">
+      🗑 Delete
+    </button>
     <button onclick="closeDetail()" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--cream);cursor:pointer;font-size:18px;color:var(--text-muted);display:flex;align-items:center;justify-content:center;font-family:inherit;">✕</button>
   </div>
 
@@ -1003,6 +1007,62 @@
 </div>
 
 
+<!-- ==================== DUPLICATE CHECK MODAL ==================== -->
+<div id="dupCheckModal" class="modal-overlay" style="display:none;">
+  <div class="modal" style="max-width:680px;width:100%;">
+    <div class="modal-header">
+      <h2>⚠ Existing Invoices Found</h2>
+    </div>
+    <div class="modal-body">
+      <p id="dupCheckMsg" style="color:var(--text-muted);font-size:14px;margin-bottom:16px;"></p>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#F8F4F0;">
+              <th style="padding:8px 12px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;">Invoice #</th>
+              <th style="padding:8px 12px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;">Name</th>
+              <th style="padding:8px 12px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;">Type</th>
+              <th style="padding:8px 12px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;">Amount</th>
+              <th style="padding:8px 12px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;">Paid</th>
+              <th style="padding:8px 12px;text-align:right;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;">Balance</th>
+              <th style="padding:8px 12px;text-align:center;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="dupCheckBody"></tbody>
+        </table>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:14px;">You can copy an invoice number and go to Retrieve to record a payment, or continue to generate a new invoice.</p>
+    </div>
+    <div class="modal-actions" style="gap:10px;">
+      <button class="btn" onclick="dupGoToRetrieve()" style="background:var(--cream);color:var(--navy);border:1.5px solid var(--light-border);">Go to Retrieve →</button>
+      <button class="btn btn-primary" id="dupGenerateBtn" onclick="dupGenerateAnyway()">Generate New Invoice</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== DELETE INVOICE MODAL ==================== -->
+<div id="deleteInvModal" class="modal-overlay" style="display:none;">
+  <div class="modal" style="max-width:440px;">
+    <div class="modal-header">
+      <h2>🗑 Delete Invoice</h2>
+    </div>
+    <div class="modal-body">
+      <p id="deleteInvMsg" style="font-size:14px;margin-bottom:12px;"></p>
+      <div style="background:#FFF0F0;border-radius:8px;padding:10px 14px;font-size:13px;color:var(--deep-red);">
+        <strong>This will permanently delete:</strong>
+        <ul style="margin:6px 0 0 16px;padding:0;">
+          <li>The invoice record from the sheet</li>
+          <li>All payment records for this invoice</li>
+        </ul>
+      </div>
+    </div>
+    <div class="modal-actions" style="gap:10px;">
+      <button class="btn" onclick="document.getElementById('deleteInvModal').style.display='none';" style="background:var(--cream);color:var(--navy);border:1.5px solid var(--light-border);">Cancel</button>
+      <button class="btn" id="deleteInvBtn" onclick="confirmDeleteInvoice()" style="background:var(--deep-red);color:#fff;border:none;">Delete Permanently</button>
+    </div>
+  </div>
+</div>
+
 <!-- ==================== ARCHIVE MODAL ==================== -->
 <div id="archiveModal" class="modal-overlay" style="display:none;">
   <div class="modal-card" style="max-width:520px;width:100%;">
@@ -1178,6 +1238,106 @@ function showSaveError(msg, detail) {
       </div>
     </div>`;
   document.body.appendChild(overlay);
+}
+
+// ── Duplicate check ──────────────────────────────────────────────────────────
+let _dupCheckCallback = null; // called when user clicks "Generate Anyway"
+
+async function checkDuplicatesBeforeGenerate(type, name, email, onProceed) {
+  if (!hasBackend() || !name) { onProceed(); return; }
+  try {
+    const sp = currentSession ? `session=${encodeURIComponent(currentSession.sessionToken)}` : `token=${encodeURIComponent(currentToken)}`;
+    const res  = await fetch(`${APPS_SCRIPT_URL}?action=checkDuplicates&${sp}&name=${encodeURIComponent(name)}&email=${encodeURIComponent(email||'')}`);
+    const data = await res.json();
+    if (!data.duplicates || data.duplicates.length === 0) { onProceed(); return; }
+
+    // Show modal
+    _dupCheckCallback = onProceed;
+    const typeLabel = type === 'sponsor' ? 'sponsor' : 'vendor';
+    document.getElementById('dupCheckMsg').textContent =
+      `Found ${data.duplicates.length} existing invoice(s) matching "${name}" — are you sure you want to create a new one?`;
+
+    document.getElementById('dupCheckBody').innerHTML = data.duplicates.map(d => {
+      const statusCls = d.status==='PAID'?'status-paid':d.status==='PARTIAL'?'status-partial':'status-unpaid';
+      const dateStr   = d.invoiceDate ? new Date(d.invoiceDate).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+      return `<tr style="border-bottom:1px solid var(--light-border);">
+        <td style="padding:8px 12px;font-weight:600;color:#2A5BC8;white-space:nowrap;">
+          ${escHtml(d.invoiceNumber)}
+          <button onclick="copyInvNum('${escHtml(d.invoiceNumber)}')" title="Copy invoice number"
+            style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 4px;color:var(--text-muted);">📋</button>
+        </td>
+        <td style="padding:8px 12px;">${escHtml(d.billTo||'—')}</td>
+        <td style="padding:8px 12px;color:var(--text-muted);text-transform:capitalize;">${d.type}</td>
+        <td style="padding:8px 12px;text-align:right;">${fmt(d.amount||0)}</td>
+        <td style="padding:8px 12px;text-align:right;color:var(--success);">${fmt(d.collected||0)}</td>
+        <td style="padding:8px 12px;text-align:right;color:var(--deep-red);">${fmt(d.outstanding||0)}</td>
+        <td style="padding:8px 12px;text-align:center;"><span class="status-badge ${statusCls}">${d.status}</span></td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('dupCheckModal').style.display = 'flex';
+  } catch(e) {
+    // If check fails silently, proceed with generation
+    onProceed();
+  }
+}
+
+function copyInvNum(num) {
+  navigator.clipboard.writeText(num).then(() => showToast('✓ Copied: ' + num));
+}
+
+function dupGoToRetrieve() {
+  document.getElementById('dupCheckModal').style.display = 'none';
+  _dupCheckCallback = null;
+  switchType('retrieve');
+}
+
+function dupGenerateAnyway() {
+  document.getElementById('dupCheckModal').style.display = 'none';
+  if (_dupCheckCallback) { _dupCheckCallback(); _dupCheckCallback = null; }
+}
+
+// ── Delete invoice (admin only) ───────────────────────────────────────────────
+let _deleteInvTarget = null;
+
+function showDeleteInvoice(inv) {
+  if (!currentIsAdmin) { showToast('⚠ Admin access required', '#B5281C'); return; }
+  _deleteInvTarget = inv;
+  document.getElementById('deleteInvMsg').innerHTML =
+    `Delete invoice <strong>${escHtml(inv.invoiceNumber)}</strong> for <strong>${escHtml(inv.billTo||'')}</strong>?<br>
+     <span style="color:var(--text-muted);font-size:13px;">This cannot be undone.</span>`;
+  document.getElementById('deleteInvModal').style.display = 'flex';
+}
+
+async function confirmDeleteInvoice() {
+  if (!_deleteInvTarget) return;
+  const btn = document.getElementById('deleteInvBtn');
+  btn.textContent = 'Deleting…'; btn.disabled = true;
+
+  try {
+    const body = {
+      action:        'deleteInvoice',
+      invoiceNumber: _deleteInvTarget.invoiceNumber,
+      invoiceType:   _deleteInvTarget.type,
+      session:       currentSession?.sessionToken,
+    };
+    const res  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify(body) });
+    const data = await res.json();
+
+    document.getElementById('deleteInvModal').style.display = 'none';
+    btn.textContent = 'Delete Permanently'; btn.disabled = false;
+
+    if (data.error) { showToast('⚠ Delete failed: ' + data.error, '#B5281C'); return; }
+
+    showToast(`✓ Invoice ${_deleteInvTarget.invoiceNumber} deleted`);
+    _deleteInvTarget = null;
+    // Refresh results
+    closeDetail();
+    doLoadAll();
+  } catch(e) {
+    btn.textContent = 'Delete Permanently'; btn.disabled = false;
+    showToast('⚠ Delete failed: ' + e.message, '#B5281C');
+  }
 }
 
 // Updates token modal UI after server confirms MFA is required
@@ -2184,9 +2344,8 @@ function showToast(msg,color){const t=document.getElementById('toast');t.textCon
 // ================================================================
 // PREVIEW
 // ================================================================
-function showPreview(type){
+async function showPreview(type){
   const isV = type === 'vendor';
-  // Run same validation as generatePDF — no preview of incomplete invoices
   const billToVal  = document.getElementById(isV?'vn_billTo':'sp_billTo').value.trim();
   const emailVal   = document.getElementById(isV?'vn_contactEmail':'sp_contactEmail').value.trim();
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal);
@@ -2201,10 +2360,13 @@ function showPreview(type){
     if (boothErrEl && boothErrEl.style.display !== 'none' && boothErrEl.textContent)
       errors.push('Booth total exceeds package amount');
   }
-  if (errors.length > 0) {
-    showToast('⚠ ' + errors[0], '#B5281C');
-    return;
-  }
+  if (errors.length > 0) { showToast('⚠ ' + errors[0], '#B5281C'); return; }
+
+  // Duplicate check before preview
+  await new Promise(resolve => {
+    checkDuplicatesBeforeGenerate(type, billToVal, emailVal, resolve);
+  });
+
   document.getElementById('invoiceContent').innerHTML = isV ? buildVnHTML() : buildSpHTML();
   document.getElementById('previewModal').classList.add('open');
 }
@@ -2385,6 +2547,14 @@ function pdfDrawTotalsBand(doc, label, amount, y) {
 }
 
 async function generatePDF(type){
+  // Duplicate check before generating
+  const isV2   = type === 'vendor';
+  const _name  = isV2 ? document.getElementById('vn_billTo').value.trim()
+                      : document.getElementById('sp_billTo').value.trim();
+  const _email = isV2 ? document.getElementById('vn_contactEmail').value.trim()
+                      : document.getElementById('sp_contactEmail').value.trim();
+  await new Promise(resolve => { checkDuplicatesBeforeGenerate(type, _name, _email, resolve); });
+
   // Prevent double-clicks / concurrent downloads
   if (document.querySelector('.btn-download.loading')) return;
   setDownloadBusy(true);
@@ -3314,6 +3484,10 @@ async function openDetail(idx) {
   } else {
     pdfBtn.style.display='none';
   }
+
+  // Show delete button for admins only
+  const delBtn = document.getElementById('rt_deleteBtn');
+  if (delBtn) delBtn.style.display = currentIsAdmin ? '' : 'none';
 
   // Always fetch fresh from backend
   await loadPayments(inv.invoiceNumber, inv.invoiced || inv.invoicedAmount || 0);
