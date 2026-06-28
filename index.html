@@ -1786,7 +1786,7 @@ async function saveToken() {
       currentDisplayName = cfg.displayName || val;
       currentIsAdmin      = cfg.isAdmin === true;
       currentIsSuperAdmin = cfg.isSuperAdmin === true;
-      currentRole         = cfg.role || (cfg.isAdmin ? 'admin' : 'readOnly');
+      currentRole         = cfg.role || 'readOnly';
       closeTokenModal();
       applyRoleUI();
       const roleLabel1 = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
@@ -1942,7 +1942,7 @@ async function verifyOtp() {
     currentDisplayName    = data.displayName;
     currentIsAdmin        = data.isAdmin;
     currentIsSuperAdmin   = data.isSuperAdmin || false;
-    currentRole           = data.role || (data.isAdmin ? 'admin' : 'readOnly');
+    currentRole           = data.role || 'readOnly';
     if (data.maskDonorNames !== undefined) CFG.maskDonorName = data.maskDonorNames;
     CFG.defaultCcEmail    = data.defaultCc || '';
 
@@ -2013,7 +2013,7 @@ async function initConnection() {
     currentDisplayName  = stored.displayName;
     currentIsAdmin      = stored.isAdmin;
     currentIsSuperAdmin = stored.isSuperAdmin || false;
-    currentRole         = stored.role || (stored.isAdmin ? 'admin' : 'readOnly');
+    currentRole         = stored.role || 'readOnly';
     MFA_ENABLED_CLIENT  = true;
     if (stored.maskDonorNames !== undefined) CFG.maskDonorName = stored.maskDonorNames;
     CFG.defaultCcEmail = stored.defaultCc || '';
