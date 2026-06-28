@@ -280,7 +280,7 @@
     <span class="status-text" id="statusText">Connecting…</span>
     <span class="status-token" id="statusToken"></span>
   </div>
-  <button class="sb-link" onclick="showTokenModal(true)">Switch user</button>
+  <button class="sb-link" onclick="handleSwitchUser()">Switch user</button>
 </div>
 
 <!-- Persistent error banner — shown when data fetch fails -->
@@ -1005,6 +1005,16 @@
 </div>
 
 
+<!-- ==================== SESSION ENDED MODAL ==================== -->
+<div id="sessionEndedModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:none;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:36px;max-width:380px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+    <div style="font-size:36px;margin-bottom:16px;">🔒</div>
+    <div style="font-size:18px;font-weight:700;color:#1A2B4A;margin-bottom:10px;">Session Ended</div>
+    <div style="font-size:14px;color:#666;margin-bottom:24px;line-height:1.5;">You logged in from another tab. This session has been ended for security.</div>
+    <button onclick="window.close()" style="width:100%;padding:12px;background:#B5281C;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;">Close This Tab</button>
+  </div>
+</div>
+
 <!-- ==================== DUPLICATE CHECK MODAL ==================== -->
 <div id="dupCheckModal" class="modal-overlay" style="display:none;">
   <div class="modal" style="max-width:680px;width:100%;">
@@ -1449,6 +1459,53 @@ function applyRoleUI() {
   if (delBtn) delBtn.style.display = currentIsSuperAdmin ? '' : 'none';
 }
 
+// ── Session ended (kicked by new login from another tab) ─────────────────────
+function showSessionEnded() {
+  // Stop all background activity
+  stopRolePolling();
+  // Show locked modal — only option is to close the tab
+  const modal = document.getElementById('sessionEndedModal');
+  if (modal) modal.style.display = 'flex';
+  // Disable all interaction on the page
+  document.body.style.pointerEvents = 'none';
+  if (modal) modal.style.pointerEvents = 'all';
+}
+
+// ── Background role polling ───────────────────────────────────────────────────
+// Silently checks server every 30s for role changes — no hard reload needed
+let _rolePollInterval = null;
+
+function startRolePolling() {
+  if (_rolePollInterval) clearInterval(_rolePollInterval);
+  _rolePollInterval = setInterval(async () => {
+    if (!currentSession || !currentSession.sessionToken) return;
+    try {
+      const sp  = `session=${encodeURIComponent(currentSession.sessionToken)}`;
+      const res = await fetch(`${APPS_SCRIPT_URL}?action=refreshRole&${sp}`);
+      const rd  = await res.json();
+      if (!rd.error && rd.role && rd.role !== currentRole) {
+        currentIsAdmin      = rd.isAdmin      || false;
+        currentIsSuperAdmin = rd.isSuperAdmin || false;
+        currentRole         = rd.role;
+        currentSession.isAdmin      = currentIsAdmin;
+        currentSession.isSuperAdmin = currentIsSuperAdmin;
+        currentSession.role         = currentRole;
+        sessionStorage.setItem('bapSession', JSON.stringify(currentSession));
+        const rl = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
+        setStatus('ok', 'Connected', `· ${currentDisplayName}${rl}`);
+        applyRoleUI();
+        if (currentRole === 'readOnly') loadReports();
+        else if (currentType === 'reports') switchType('sponsor');
+        showToast(`Role updated to ${currentRole === 'superadmin' ? 'Super Admin' : currentRole === 'admin' ? 'Admin' : 'Read Only'}`);
+      }
+    } catch(e) { /* silently ignore — next poll will retry */ }
+  }, 30000); // every 30 seconds
+}
+
+function stopRolePolling() {
+  if (_rolePollInterval) { clearInterval(_rolePollInterval); _rolePollInterval = null; }
+}
+
 // Updates token modal UI after server confirms MFA is required
 function updateModalForMFAMode(mfaRequired) {
   const hint = document.getElementById('mfa_step1_hint');
@@ -1677,6 +1734,17 @@ const emailState = {
 
 // ── Rate limiter — prevents double-submits and backend spam ───────────────
 let _lastFetchTime = 0;
+async function checkSessionValid(response) {
+  try {
+    const clone = response.clone();
+    const d = await clone.json();
+    if (d.error === 'session_invalid' || d.error === 'session_expired') {
+      showSessionEnded();
+    }
+  } catch(e) {}
+  return response;
+}
+
 function rateLimitedFetch(url, opts, minGapMs = 800) {
   const now = Date.now();
   if (now - _lastFetchTime < minGapMs) {
@@ -1700,7 +1768,16 @@ function rateLimitedFetch(url, opts, minGapMs = 800) {
                 + '&fp=' + encodeURIComponent(getBrowserFingerprint());
     }
   }
-  return fetch(url, opts);
+  return fetch(url, opts).then(r => checkSessionValid(r));
+}
+
+function handleSwitchUser() {
+  if (currentSession || currentToken) {
+    // Already logged in — open new tab for fresh login with role refresh
+    window.open(window.location.href, '_blank');
+  } else {
+    showTokenModal(false);
+  }
 }
 
 function showTokenModal(isChange) {
@@ -1789,6 +1866,7 @@ async function saveToken() {
       currentRole         = cfg.role || 'readOnly';
       closeTokenModal();
       applyRoleUI();
+      startRolePolling();
       const roleLabel1 = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
       setStatus('ok', 'Connected', `· ${currentDisplayName}${roleLabel1}`);
       if (currentRole === 'readOnly') loadReports();
@@ -1955,6 +2033,7 @@ async function verifyOtp() {
     const _rl = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
     setStatus('ok', 'Connected', `· ${currentDisplayName}${_rl}`);
     applyRoleUI();
+    startRolePolling();
     if (currentRole === 'readOnly') loadReports();
 
   } catch(e) {
@@ -2020,6 +2099,7 @@ async function initConnection() {
     const _rl0 = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
     setStatus('ok', 'Connected', `· ${currentDisplayName}${_rl0}`);
     applyRoleUI();
+    startRolePolling();
     if (currentRole === 'readOnly') loadReports();
 
     // Re-validate role from server — role may have changed since session was created
@@ -2027,10 +2107,8 @@ async function initConnection() {
       const sp = `session=${encodeURIComponent(stored.sessionToken)}`;
       const rv = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=refreshRole&${sp}`);
       const rd = await rv.json();
-      console.log('[BAP] refreshRole response:', JSON.stringify(rd));
       if (!rd.error && rd.role !== undefined) {
         const roleChanged = rd.role !== currentRole;
-        console.log('[BAP] role: cached=' + currentRole + ' server=' + rd.role + ' changed=' + roleChanged);
         currentIsAdmin      = rd.isAdmin      || false;
         currentIsSuperAdmin = rd.isSuperAdmin || false;
         currentRole         = rd.role         || currentRole;
@@ -2046,9 +2124,8 @@ async function initConnection() {
           else switchType('sponsor');
         }
       } else {
-        console.log('[BAP] refreshRole error or no role:', JSON.stringify(rd));
       }
-    } catch(e) { console.log('[BAP] refreshRole exception:', e.message); }
+    } catch(e) { /* server unreachable — keep cached role */ }
 
     try {
       const r = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=nextNumber&session=${encodeURIComponent(stored.sessionToken)}`);
