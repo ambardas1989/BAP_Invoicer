@@ -1415,6 +1415,26 @@ async function confirmDeleteInvoice() {
   }
 }
 
+function applyRoleUI() {
+  // Hide/show tabs based on role
+  const btns = document.querySelectorAll('.toggle-btn');
+  const isRO = currentRole === 'readOnly';
+  btns.forEach(btn => {
+    const onclick = btn.getAttribute('onclick') || '';
+    const isReports = onclick.includes("'reports'");
+    if (isRO) {
+      btn.style.display = isReports ? '' : 'none';
+    } else {
+      btn.style.display = '';
+    }
+  });
+  // Hide generate/form buttons for readOnly
+  ['sponsorForm','vendorForm','donationForm'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.pointerEvents = isRO ? 'none' : '';
+  });
+}
+
 // Updates token modal UI after server confirms MFA is required
 function updateModalForMFAMode(mfaRequired) {
   const hint = document.getElementById('mfa_step1_hint');
@@ -1618,8 +1638,10 @@ function getBrowserFingerprint() {
   }
   return 'fp_' + Math.abs(hash).toString(36);
 }
-let currentDisplayName = '';
-let currentIsAdmin     = false;
+let currentDisplayName  = '';
+let currentIsAdmin      = false;
+let currentIsSuperAdmin = false;
+let currentRole         = 'readOnly';
 let tokenModalIsChange = false;
 let _lastSearchWasLoadAll = false;
 
@@ -1748,9 +1770,13 @@ async function saveToken() {
     if (!MFA_ENABLED_CLIENT) {
       // No MFA — connect directly using whoAmI response
       currentDisplayName = cfg.displayName || val;
-      currentIsAdmin     = cfg.isAdmin === true;
+      currentIsAdmin      = cfg.isAdmin === true;
+      currentIsSuperAdmin = cfg.isSuperAdmin === true;
+      currentRole         = cfg.role || (cfg.isAdmin ? 'admin' : 'readOnly');
       closeTokenModal();
-      setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}`);
+      applyRoleUI();
+      const roleLabel1 = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
+      setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}${roleLabel1}`);
       try {
         const r2 = await fetch(`${APPS_SCRIPT_URL}?action=nextNumber&token=${encodeURIComponent(val)}`);
         const d2 = await r2.json();
@@ -1900,6 +1926,8 @@ async function verifyOtp() {
     });
     currentDisplayName    = data.displayName;
     currentIsAdmin        = data.isAdmin;
+    currentIsSuperAdmin   = data.isSuperAdmin || false;
+    currentRole           = data.role || (data.isAdmin ? 'admin' : 'readOnly');
     if (data.maskDonorNames !== undefined) CFG.maskDonorName = data.maskDonorNames;
     CFG.defaultCcEmail    = data.defaultCc || '';
 
@@ -1909,7 +1937,9 @@ async function verifyOtp() {
 
     // Close modal and connect
     closeTokenModal();
-    setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}`);
+    const _rl = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
+    setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}${_rl}`);
+    applyRoleUI();
 
   } catch(e) {
     btn.innerHTML = 'Verify →';
@@ -1964,11 +1994,15 @@ async function initConnection() {
   if (stored) {
     currentSession     = stored;
     currentDisplayName = stored.displayName;
-    currentIsAdmin     = stored.isAdmin;
-    MFA_ENABLED_CLIENT = true;
+    currentIsAdmin      = stored.isAdmin;
+    currentIsSuperAdmin = stored.isSuperAdmin || false;
+    currentRole         = stored.role || (stored.isAdmin ? 'admin' : 'readOnly');
+    MFA_ENABLED_CLIENT  = true;
     if (stored.maskDonorNames !== undefined) CFG.maskDonorName = stored.maskDonorNames;
     CFG.defaultCcEmail = stored.defaultCc || '';
-    setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}`);
+    const _rl = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
+    setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}${_rl}`);
+    applyRoleUI();
     try {
       const r = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=nextNumber&session=${encodeURIComponent(stored.sessionToken)}`);
       const d = await r.json();
@@ -2040,6 +2074,10 @@ async function logInvoice(type, num, data) {
 // ================================================================
 let currentType = 'sponsor';
 function switchType(type) {
+  if (currentRole === 'readOnly' && type !== 'reports') {
+    showToast('⚠ Read-only access — Reports tab only', '#B5281C');
+    type = 'reports';
+  }
   currentType = type;
   document.querySelectorAll('.toggle-btn').forEach((b,i)=>b.classList.toggle('active',
     (type==='sponsor'&&i===0)||(type==='vendor'&&i===1)||(type==='donation'&&i===2)||(type==='retrieve'&&i===3)||(type==='reports'&&i===4)));
@@ -3564,7 +3602,7 @@ async function openDetail(idx) {
 
   // Show delete button for admins only
   const delBtn = document.getElementById('rt_deleteBtn');
-  if (delBtn) delBtn.style.display = currentIsAdmin ? '' : 'none';
+  if (delBtn) delBtn.style.display = currentIsSuperAdmin ? '' : 'none';
 
   // Always fetch fresh from backend
   await loadPayments(inv.invoiceNumber, inv.invoiced || inv.invoicedAmount || 0);
