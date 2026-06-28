@@ -705,8 +705,13 @@
       <div>
         <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Donation Invoice #</div>
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
-        <div style="font-size:18px;font-weight:700;color:var(--navy);font-family:'Playfair Display',serif;" id="don_invNumber">Generating…</div>
-      </div>
+          <input type="text" id="don_invNumber" value="Generating…" readonly
+            style="background:#EEF2FF;color:#2A5BC8;font-weight:600;font-size:15px;border:1.5px solid #C7D2F8;border-radius:8px;padding:8px 12px;min-width:220px;cursor:default;">
+          <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
+            <input type="checkbox" id="don_invOverride" onchange="toggleInvOverride('don')" style="cursor:pointer;">
+            Override
+          </label>
+        </div>
       </div>
       <button onclick="refreshDonInvNumber()" style="margin-left:auto;background:none;border:none;color:var(--saffron);cursor:pointer;font-size:13px;">↻ Regenerate</button>
     </div>
@@ -1305,6 +1310,9 @@ function dupCancel() {
 
 async function checkDupThenEmail(type) {
   const isV   = type === 'vendor';
+  const _emPrefix = isV ? 'vn' : 'sp';
+  const _emValid = await validateInvNumberIfOverride(_emPrefix);
+  if (!_emValid) return;
   const name  = document.getElementById(isV?'vn_billTo':'sp_billTo').value.trim();
   const email = document.getElementById(isV?'vn_contactEmail':'sp_contactEmail').value.trim();
   await new Promise(resolve => { checkDuplicatesBeforeGenerate(type, name, email, resolve); });
@@ -2148,6 +2156,58 @@ function generateLocalNumbers() {
   document.getElementById('vn_invNumber').value = genInvoiceNumber('vendor', vnRef);
 }
 
+// ── Invoice number override + uniqueness check ───────────────────────────────
+function toggleInvOverride(prefix) {
+  const cb  = document.getElementById(`${prefix}_invOverride`);
+  const inp = document.getElementById(`${prefix}_invNumber`);
+  if (!inp) return;
+  if (cb.checked) {
+    inp.removeAttribute('readonly');
+    inp.style.cursor    = 'text';
+    inp.style.background = '#FFFDE7';
+    inp.style.border     = '1.5px solid var(--saffron)';
+    inp.focus();
+    inp.select();
+  } else {
+    inp.setAttribute('readonly', true);
+    inp.style.cursor    = 'default';
+    inp.style.background = '#EEF2FF';
+    inp.style.border    = '';
+    // Regenerate number when unchecking
+    if (prefix === 'sp') generateLocalNumbers();
+    else if (prefix === 'vn') generateLocalNumbers();
+    else if (prefix === 'don') refreshDonInvNumber();
+  }
+}
+
+async function checkInvoiceNumberUnique(num) {
+  // Returns true if unique, false if duplicate
+  if (!num || !hasBackend()) return true;
+  try {
+    const sp  = currentSession ? `session=${encodeURIComponent(currentSession.sessionToken)}` : `token=${encodeURIComponent(currentToken)}`;
+    const res = await fetch(`${APPS_SCRIPT_URL}?action=checkDuplicate&${sp}&invoiceNumber=${encodeURIComponent(num)}`);
+    const d   = await res.json();
+    return !d.exists;
+  } catch(e) { return true; } // if check fails, allow proceed
+}
+
+async function validateInvNumberIfOverride(prefix) {
+  const cb  = document.getElementById(`${prefix}_invOverride`);
+  if (!cb || !cb.checked) return true; // not overriding — skip check
+  const inp = document.getElementById(`${prefix}_invNumber`);
+  const num = inp ? inp.value.trim() : '';
+  if (!num) { showToast('⚠ Invoice number cannot be empty', '#B5281C'); return false; }
+  const unique = await checkInvoiceNumberUnique(num);
+  if (!unique) {
+    showToast(`⚠ Invoice number "${num}" already exists — choose a different number`, '#B5281C');
+    inp.style.border = '1.5px solid var(--deep-red)';
+    inp.focus();
+    return false;
+  }
+  inp.style.border = '1.5px solid #4CAF50';
+  return true;
+}
+
 async function checkDuplicate(num) {
   if (!hasBackend()) return false;
   if (!currentToken) return false;
@@ -2597,6 +2657,11 @@ async function showPreview(type){
   }
   if (errors.length > 0) { showToast('⚠ ' + errors[0], '#B5281C'); return; }
 
+  // Check invoice number uniqueness if override is active
+  const _pvPrefix = isV ? 'vn' : 'sp';
+  const _pvValid = await validateInvNumberIfOverride(_pvPrefix);
+  if (!_pvValid) return;
+
   // Duplicate check before preview
   await new Promise(resolve => {
     checkDuplicatesBeforeGenerate(type, billToVal, emailVal, resolve);
@@ -2783,6 +2848,11 @@ function pdfDrawTotalsBand(doc, label, amount, y) {
 }
 
 async function generatePDF(type){
+  // Check invoice number uniqueness if override is active
+  const _prefix = type === 'vendor' ? 'vn' : 'sp';
+  const _invValid = await validateInvNumberIfOverride(_prefix);
+  if (!_invValid) return;
+
   // Duplicate check before generating
   const isV2   = type === 'vendor';
   const _name  = isV2 ? document.getElementById('vn_billTo').value.trim()
@@ -3392,7 +3462,7 @@ async function sendEmail() {
       try {
         // Use snapshot captured at modal-open time — form may have reset by now
         const donData   = emailState.donFormData || getDonFormData();
-        const donInvNum = donData.invoiceNumber || document.getElementById('don_invNumber').textContent;
+        const donInvNum = donData.invoiceNumber || document.getElementById('don_invNumber').value;
         const logRes  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({
           action: 'logDonation', token: currentToken,
           ...donData, pdfBase64: emailState.pdfBase64,
@@ -5029,19 +5099,19 @@ function getSelectedDonFY() {
 }
 
 async function refreshDonInvNumber() {
-  document.getElementById('don_invNumber').textContent = 'Generating…';
+  document.getElementById('don_invNumber').value = 'Generating…';
   const fy = getSelectedDonFY();
   if (!hasBackend() || !fy) {
-    document.getElementById('don_invNumber').textContent = genLocalDonNumber(fy);
+    document.getElementById('don_invNumber').value = genLocalDonNumber(fy);
     return;
   }
   try {
     const donParam = currentSession ? `session=${encodeURIComponent(currentSession.sessionToken)}` : `token=${encodeURIComponent(currentToken)}`;
     const res  = await fetch(`${APPS_SCRIPT_URL}?action=nextDonNumber&${donParam}&fy=${encodeURIComponent(fy)}`);
     const data = await res.json();
-    document.getElementById('don_invNumber').textContent = data.nextDON || genLocalDonNumber(fy);
+    document.getElementById('don_invNumber').value = data.nextDON || genLocalDonNumber(fy);
   } catch(e) {
-    document.getElementById('don_invNumber').textContent = genLocalDonNumber(fy);
+    document.getElementById('don_invNumber').value = genLocalDonNumber(fy);
   }
 }
 
@@ -5102,7 +5172,7 @@ function getDonFormData() {
   const amt        = parseFloat(document.getElementById('don_amount').value) || 0;
   const matchAmt   = corpMatch ? (parseFloat(document.getElementById('don_corpMatchAmount').value) || 0) : 0;
   return {
-    invoiceNumber:     document.getElementById('don_invNumber').textContent,
+    invoiceNumber:     document.getElementById('don_invNumber').value,
     donorName:         anonymous ? 'Anonymous' : document.getElementById('don_donorName').value.trim(),
     donorEmail:        document.getElementById('don_email').value.trim(),
     donorPhone:        document.getElementById('don_phone').value.trim(),
@@ -5253,7 +5323,7 @@ async function generateDonPDF(emailMode) {
   try {
     const res  = await rateLimitedFetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
       action:'logDonation', token:currentToken, ...d, pdfBase64,
-      invoiceNumber: document.getElementById('don_invNumber').textContent
+      invoiceNumber: document.getElementById('don_invNumber').value
     })});
     const data = await res.json();
     if (data.error) { showToast('⚠ ' + data.error,'#B5281C'); btn.textContent='⬇ Download Receipt'; btn.disabled=false; return null; }
