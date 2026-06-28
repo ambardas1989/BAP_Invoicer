@@ -1787,6 +1787,7 @@ async function saveToken() {
       applyRoleUI();
       const roleLabel1 = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
       setStatus('ok', 'Connected', `· ${currentDisplayName}${roleLabel1}`);
+      if (currentRole === 'readOnly') loadReports();
       try {
         const r2 = await fetch(`${APPS_SCRIPT_URL}?action=nextNumber&token=${encodeURIComponent(val)}`);
         const d2 = await r2.json();
@@ -1950,6 +1951,7 @@ async function verifyOtp() {
     const _rl = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
     setStatus('ok', 'Connected', `· ${currentDisplayName}${_rl}`);
     applyRoleUI();
+    if (currentRole === 'readOnly') loadReports();
 
   } catch(e) {
     btn.innerHTML = 'Verify →';
@@ -2013,6 +2015,7 @@ async function initConnection() {
     const _rl = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
     setStatus('ok', 'Connected', `· ${currentDisplayName}${_rl}`);
     applyRoleUI();
+    if (currentRole === 'readOnly') loadReports();
     try {
       const r = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=nextNumber&session=${encodeURIComponent(stored.sessionToken)}`);
       const d = await r.json();
