@@ -907,7 +907,7 @@
       <div id="rp_boothSummaryContent"></div>
     </div>
     <!-- Sponsorship table -->
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card" id="rp_spSection" style="margin-bottom:16px;display:none;">
       <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--saffron);padding:16px 20px;border-bottom:1px solid var(--light-border);">
         🎗 Sponsorship Invoices
         <span id="rp_spCount" style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:8px;"></span>
@@ -939,7 +939,7 @@
       </div>
     </div>
     <!-- Vendor table -->
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card" id="rp_vnSection" style="margin-bottom:16px;display:none;">
       <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--saffron);padding:16px 20px;border-bottom:1px solid var(--light-border);">
         🏪 Vendor / Booth Invoices
         <span id="rp_vnCount" style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:8px;"></span>
@@ -971,7 +971,7 @@
   </div>
 
     <!-- Donations table -->
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card" id="rp_donSection" style="margin-bottom:16px;display:none;">
       <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--saffron);padding:16px 20px;border-bottom:1px solid var(--light-border);">
         🙏 Donation Invoices
         <span id="rp_donCount" style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:8px;"></span>
@@ -4465,6 +4465,8 @@ function renderTables(sponsors, vendors, donations) {
   if(_spCol)  _spCol.textContent  = fmt(spTotals.collected);
   if(_spOut)  _spOut.textContent  = fmt(spTotals.outstanding);
   if(_spBoot) _spBoot.textContent = spBoothTot > 0 ? fmt(spBoothTot) : '—';
+  const spSection = document.getElementById('rp_spSection');
+  if (spSection) spSection.style.display = sponsors.length > 0 ? '' : 'none';
   document.getElementById('rp_spBody').innerHTML = sponsors.length === 0
     ? '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--text-muted);">No sponsorship invoices</td></tr>'
     : sponsors.map(r => rpTableRow(r, r['Package']||r.packageName||'—')).join('');
@@ -4510,6 +4512,8 @@ function renderTables(sponsors, vendors, donations) {
         }).join('')
     : '';
 
+  const vnSection = document.getElementById('rp_vnSection');
+  if (vnSection) vnSection.style.display = (vendors.length > 0 || sponsorBoothRows.length > 0) ? '' : 'none';
   document.getElementById('rp_vnBody').innerHTML = vendors.length===0 && sponsorBoothRows.length===0
     ? '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-muted);">No vendor invoices</td></tr>'
     : vendors.map(r => rpTableRow(r, r['Event Name']||r.eventName||'—')).join('') + boothSponsorRowsHtml;
@@ -4524,6 +4528,8 @@ function renderTables(sponsors, vendors, donations) {
   if(_donAmt)  _donAmt.textContent  = fmt(donAmtTot);
   if(_donCorp) _donCorp.textContent = donCorpTot > 0 ? fmt(donCorpTot) : '—';
   if(_donVal)  _donVal.textContent  = fmt(donValTot);
+  const donSection = document.getElementById('rp_donSection');
+  if (donSection) donSection.style.display = donations.length > 0 ? '' : 'none';
   document.getElementById('rp_donCount').textContent = `(${donations.length} receipt${donations.length===1?'':'s'})`;
   document.getElementById('rp_donBody').innerHTML = donations.length === 0
     ? '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text-muted);">No donations recorded</td></tr>'
