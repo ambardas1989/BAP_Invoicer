@@ -323,7 +323,7 @@
         <input type="text" id="sp_invNumber" value="BAP-SPN-2025-26-XXXX" readonly
           style="background:#EEF2FF;color:#2A5BC8;font-weight:600;cursor:default;">
       </div>
-      <div class="form-group"><label>Invoice Date</label><input type="date" id="sp_invDate"></div>
+      <div class="form-group"><label>Invoice Date</label><input type="date" id="sp_invDate" oninput="validateDates('sp')"></div>
       <div class="form-group"><label>Tax ID</label><input type="text" id="sp_taxId"></div>
     </div>
     <div class="form-row three">
@@ -334,8 +334,16 @@
           <option value="Event Sponsorship">Event Sponsorship</option>
         </select>
       </div>
-      <div class="form-group"><label>Start Date &amp; Time</label><input type="datetime-local" id="sp_startDate" onchange="refreshSpInvoiceNumber()"></div>
-      <div class="form-group"><label>End Date &amp; Time</label><input type="datetime-local" id="sp_endDate"></div>
+      <div class="form-group">
+        <label>Start Date &amp; Time <span style="color:var(--deep-red)">*</span></label>
+        <input type="datetime-local" id="sp_startDate" onchange="refreshSpInvoiceNumber();validateDates('sp')">
+        <div id="sp_startDateErr" style="display:none;color:var(--deep-red);font-size:11px;margin-top:3px;"></div>
+      </div>
+      <div class="form-group">
+        <label>End Date &amp; Time <span style="color:var(--deep-red)">*</span></label>
+        <input type="datetime-local" id="sp_endDate" onchange="validateDates('sp')">
+        <div id="sp_endDateErr" style="display:none;color:var(--deep-red);font-size:11px;margin-top:3px;"></div>
+      </div>
     </div>
     <div class="form-row" id="sp_eventNameRow" style="display:none;">
       <div class="form-group">
@@ -352,13 +360,17 @@
       </div>
     </div>
     <div class="form-row single">
-      <div class="form-group"><label>Payment Due By</label><input type="date" id="sp_dueDate"></div>
+      <div class="form-group">
+        <label>Payment Due By <span style="color:var(--deep-red)">*</span></label>
+        <input type="date" id="sp_dueDate" oninput="validateDates('sp')">
+        <div id="sp_dueDateErr" style="display:none;color:var(--deep-red);font-size:11px;margin-top:3px;"></div>
+      </div>
     </div>
   </div>
 
   <div class="card">
     <div class="card-title">Bill To</div>
-    <div class="form-row single"><div class="form-group"><label>Sponsor Name</label><input type="text" id="sp_billTo" placeholder="Company or Individual Name"></div></div>
+    <div class="form-row single"><div class="form-group"><label>Sponsor Name <span style="color:var(--deep-red)">*</span></label><input type="text" id="sp_billTo" placeholder="Company or Individual Name"></div></div>
     <div class="form-row">
       <div class="form-group"><label>Contact Person</label><input type="text" id="sp_contactName" placeholder="Full name (optional)"></div>
       <div class="form-group"><label>Email</label><input type="email" id="sp_contactEmail" placeholder="sponsor@example.com"></div>
@@ -382,23 +394,6 @@
     <div class="benefits-panel" id="sp_benefitsPanel">
       <div class="bp-title">📋 Included Benefits — uncheck to hide from invoice</div>
       <div id="sp_benefitsTable"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Payment Summary</div>
-    <div class="financials">
-      <div class="fin-row"><label>Package / Total Commitment ($)</label><input type="number" class="fin-input" id="sp_pkgAmt" value="5000" oninput="updateSpCalc()"></div>
-      <div class="fin-row"><label>Advance Paid ($)</label><input type="number" class="fin-input" id="sp_advancePaid" value="0" oninput="updateSpCalc();toggleAdvScreenshot('sp')"></div>
-  <div id="sp_screenshotRow" style="display:none;margin-top:8px;">
-    <div class="fin-row" style="align-items:center;gap:10px;flex-wrap:wrap;">
-      <label style="font-size:13px;color:var(--text-muted);white-space:nowrap;">📎 Advance Payment Screenshot</label>
-      <input type="file" id="sp_screenshot" accept="image/*" style="font-size:12px;flex:1;" onchange="previewScreenshot('sp')">
-    </div>
-    <div id="sp_screenshotPreview" style="display:none;margin-top:6px;font-size:12px;color:var(--success);padding:4px 8px;background:#E8F5E9;border-radius:6px;"></div>
-  </div>
-      <div class="fin-row"><label>Discount ($)</label><input type="number" class="fin-input" id="sp_discount" value="0" oninput="updateSpCalc()"></div>
-      <div class="fin-row total"><span>Final Payment Due</span><span id="sp_displayDue">$5,000.00</span></div>
     </div>
   </div>
 
@@ -432,8 +427,25 @@
   </div>
 
   <div class="card">
-    <div class="card-title">Additional Notes or Custom Offerings (optional)</div>
+    <div class="card-title">Additional Notes or Custom Offerings <span style="font-size:12px;color:var(--text-muted);font-weight:400;">(optional)</span></div>
     <div class="form-group"><textarea id="sp_notes" placeholder="Any special notes to appear on the invoice..."></textarea></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Payment Summary</div>
+    <div class="financials">
+      <div class="fin-row"><label>Package / Total Commitment ($)</label><input type="number" class="fin-input" id="sp_pkgAmt" value="5000" oninput="updateSpCalc()"></div>
+      <div class="fin-row"><label>Advance Paid ($)</label><input type="number" class="fin-input" id="sp_advancePaid" value="0" oninput="updateSpCalc();toggleAdvScreenshot('sp')"></div>
+  <div id="sp_screenshotRow" style="display:none;margin-top:8px;">
+    <div class="fin-row" style="align-items:center;gap:10px;flex-wrap:wrap;">
+      <label style="font-size:13px;color:var(--text-muted);white-space:nowrap;">📎 Advance Payment Screenshot</label>
+      <input type="file" id="sp_screenshot" accept="image/*" style="font-size:12px;flex:1;" onchange="previewScreenshot('sp')">
+    </div>
+    <div id="sp_screenshotPreview" style="display:none;margin-top:6px;font-size:12px;color:var(--success);padding:4px 8px;background:#E8F5E9;border-radius:6px;"></div>
+  </div>
+      <div class="fin-row"><label>Discount ($)</label><input type="number" class="fin-input" id="sp_discount" value="0" oninput="updateSpCalc()"></div>
+      <div class="fin-row total"><span>Final Payment Due</span><span id="sp_displayDue">$5,000.00</span></div>
+    </div>
   </div>
 
   <div class="card">
@@ -472,7 +484,11 @@
       <div class="form-group"><label>Tax ID</label><input type="text" id="vn_taxId"></div>
     </div>
     <div class="form-row single">
-      <div class="form-group"><label>Payment Due By</label><input type="date" id="vn_dueDate"></div>
+      <div class="form-group">
+        <label>Payment Due By <span style="color:var(--deep-red)">*</span></label>
+        <input type="date" id="vn_dueDate" oninput="validateDates('vn')">
+        <div id="vn_dueDateErr" style="display:none;color:var(--deep-red);font-size:11px;margin-top:3px;"></div>
+      </div>
     </div>
   </div>
 
@@ -566,7 +582,7 @@
   </div>
 
   <div class="card">
-    <div class="card-title">Additional Notes or Custom Offerings (optional)</div>
+    <div class="card-title">Additional Notes or Custom Offerings <span style="font-size:12px;color:var(--text-muted);font-weight:400;">(optional)</span></div>
     <div class="form-group"><textarea id="vn_notes" placeholder="Any special notes to appear on the invoice..."></textarea></div>
   </div>
 
@@ -1852,7 +1868,8 @@ async function saveToken() {
 
   if (!hasBackend()) {
     closeTokenModal();
-    initConnection();
+    initMandatoryFields();
+initConnection();
     return;
   }
 
@@ -2642,6 +2659,61 @@ function getCheckedDeliverables(){const items=[];document.querySelectorAll('#ven
 // ================================================================
 // UTILS
 // ================================================================
+// ── Real-time date validation ─────────────────────────────────────────────────
+function validateDates(prefix) {
+  const isVn     = prefix === 'vn';
+  const startEl  = document.getElementById(prefix + '_startDate');
+  const endEl    = document.getElementById(prefix + '_endDate');
+  const dueEl    = document.getElementById(prefix + '_dueDate');
+  const invEl    = document.getElementById(isVn ? 'vn_invoiceDate' : 'sp_invDate');
+  const startErr = document.getElementById(prefix + '_startDateErr');
+  const endErr   = document.getElementById(prefix + '_endDateErr');
+  const dueErr   = document.getElementById(prefix + '_dueDateErr');
+
+  const start = startEl && startEl.value ? new Date(startEl.value) : null;
+  const end   = endEl   && endEl.value   ? new Date(endEl.value)   : null;
+  const due   = dueEl   && dueEl.value   ? new Date(dueEl.value)   : null;
+  const inv   = invEl   && invEl.value   ? new Date(invEl.value)   : null;
+
+  // Start/end validation
+  if (startErr) {
+    const err = start && end && end <= start ? 'End date must be after start date' : '';
+    startErr.textContent = err; startErr.style.display = err ? '' : 'none';
+    if (startEl) startEl.style.borderColor = err ? 'var(--deep-red)' : '';
+  }
+  if (endErr) {
+    const err = start && end && end <= start ? 'End date must be after start date' : '';
+    endErr.textContent = err; endErr.style.display = err ? '' : 'none';
+    if (endEl) endEl.style.borderColor = err ? 'var(--deep-red)' : '';
+  }
+
+  // Due date validation
+  if (dueErr) {
+    const err = due && inv && due < inv ? 'Due date cannot be before invoice date' : '';
+    dueErr.textContent = err; dueErr.style.display = err ? '' : 'none';
+    if (dueEl) dueEl.style.borderColor = err ? 'var(--deep-red)' : '';
+  }
+}
+
+// Highlight mandatory fields on blur (when user leaves a field empty)
+function markMandatory(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('blur', () => {
+    el.style.borderColor = (!el.value || el.value.trim() === '') ? 'var(--deep-red)' : '';
+  });
+  el.addEventListener('input', () => {
+    if (el.value && el.value.trim() !== '') el.style.borderColor = '';
+  });
+}
+
+function initMandatoryFields() {
+  // Sponsor
+  ['sp_billTo','sp_contactEmail','sp_startDate','sp_endDate','sp_dueDate'].forEach(markMandatory);
+  // Vendor
+  ['vn_billTo','vn_contactEmail','vn_startDate','vn_endDate','vn_dueDate'].forEach(markMandatory);
+}
+
 function fmt(n){return'$'+(parseFloat(n)||0).toLocaleString('en-US',{minimumFractionDigits:2});}
 function fmtDate(d){if(!d)return'';const[y,m,day]=d.split('-');return['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m)-1]+' '+parseInt(day)+', '+y;}
 function setDownloadBusy(busy) {
@@ -2666,6 +2738,10 @@ async function showPreview(type){
   if (!emailVal)               errors.push('Contact email is required');
   else if (!emailValid)        errors.push('Contact email is not valid');
   if (amt <= 0)                errors.push('Amount must be greater than $0');
+  // Custom package must have explicit amount
+  const _selPkg = document.querySelector('#sponsorForm .package-card.selected');
+  if (!isV && _selPkg && _selPkg.dataset.pkg === 'CUSTOM' && amt <= 0)
+    errors.push('Please enter a custom package amount greater than $0');
   // Date validations
   const _invDateEl   = document.getElementById(isV?'vn_invoiceDate':'sp_invDate');
   const _startDateEl = document.getElementById(isV?'vn_startDate':'sp_startDate');
