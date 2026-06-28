@@ -19,7 +19,8 @@
   .status-bar{background:#1e3a5f;padding:6px clamp(12px,4vw,40px);display:flex;align-items:center;justify-content:space-between;font-size:12px;}
   .status-bar .sb-left{display:flex;align-items:center;gap:10px;}
   .status-dot{width:7px;height:7px;border-radius:50%;background:#ccc;flex-shrink:0;}
-  .status-dot.connected{background:#4CAF50;}
+  .status-dot.connected{background:#4CAF50;animation:softPulse 2s ease-in-out infinite;}
+  @keyframes softPulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(76,175,80,0.4);}50%{opacity:0.65;box-shadow:0 0 0 5px rgba(76,175,80,0);}}
   .status-dot.error{background:#E8732A;}
   .status-text{color:rgba(255,255,255,0.7);}
   .status-token{color:rgba(255,255,255,0.5);font-size:11px;}
@@ -1416,23 +1417,32 @@ async function confirmDeleteInvoice() {
 }
 
 function applyRoleUI() {
-  // Hide/show tabs based on role
   const btns = document.querySelectorAll('.toggle-btn');
   const isRO = currentRole === 'readOnly';
+
+  // Hide non-reports tabs for readOnly
   btns.forEach(btn => {
     const onclick = btn.getAttribute('onclick') || '';
     const isReports = onclick.includes("'reports'");
-    if (isRO) {
-      btn.style.display = isReports ? '' : 'none';
-    } else {
-      btn.style.display = '';
-    }
+    btn.style.display = isRO && !isReports ? 'none' : '';
   });
-  // Hide generate/form buttons for readOnly
-  ['sponsorForm','vendorForm','donationForm'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.style.pointerEvents = isRO ? 'none' : '';
-  });
+
+  // For readOnly: hide all form panels, show only reports
+  const allPanels = {
+    sponsor:  document.getElementById('sponsorForm'),
+    vendor:   document.getElementById('vendorForm'),
+    donation: document.getElementById('donationForm'),
+    retrieve: document.getElementById('rt_panel') || document.querySelector('[id*="retrieve"]'),
+    reports:  document.getElementById('reportsPanel'),
+  };
+
+  if (isRO) {
+    if (allPanels.sponsor)  allPanels.sponsor.style.display  = 'none';
+    if (allPanels.vendor)   allPanels.vendor.style.display   = 'none';
+    if (allPanels.donation) allPanels.donation.style.display = 'none';
+    if (allPanels.retrieve) allPanels.retrieve.style.display = 'none';
+    if (allPanels.reports)  allPanels.reports.style.display  = '';
+  }
 }
 
 // Updates token modal UI after server confirms MFA is required
@@ -1776,7 +1786,7 @@ async function saveToken() {
       closeTokenModal();
       applyRoleUI();
       const roleLabel1 = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
-      setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}${roleLabel1}`);
+      setStatus('ok', 'Connected', `· ${currentDisplayName}${roleLabel1}`);
       try {
         const r2 = await fetch(`${APPS_SCRIPT_URL}?action=nextNumber&token=${encodeURIComponent(val)}`);
         const d2 = await r2.json();
@@ -1938,7 +1948,7 @@ async function verifyOtp() {
     // Close modal and connect
     closeTokenModal();
     const _rl = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
-    setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}${_rl}`);
+    setStatus('ok', 'Connected', `· ${currentDisplayName}${_rl}`);
     applyRoleUI();
 
   } catch(e) {
@@ -2001,7 +2011,7 @@ async function initConnection() {
     if (stored.maskDonorNames !== undefined) CFG.maskDonorName = stored.maskDonorNames;
     CFG.defaultCcEmail = stored.defaultCc || '';
     const _rl = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
-    setStatus('ok', 'Connected to invoice log', `· ${currentDisplayName}${_rl}`);
+    setStatus('ok', 'Connected', `· ${currentDisplayName}${_rl}`);
     applyRoleUI();
     try {
       const r = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=nextNumber&session=${encodeURIComponent(stored.sessionToken)}`);
