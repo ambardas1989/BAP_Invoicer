@@ -2022,10 +2022,11 @@ async function initConnection() {
     applyRoleUI();
     if (currentRole === 'readOnly') loadReports();
 
-    // Now re-validate role from server — role may have changed since session was created
+    // Re-validate role from server — role may have changed since session was created
+    // Uses dedicated refreshRole action which accepts session tokens (whoAmI only accepts token=)
     try {
       const sp = `session=${encodeURIComponent(stored.sessionToken)}`;
-      const rv = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=whoAmI&${sp}`);
+      const rv = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=refreshRole&${sp}`);
       const rd = await rv.json();
       if (!rd.error && rd.role !== undefined) {
         const roleChanged = rd.role !== currentRole;
