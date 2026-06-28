@@ -262,6 +262,8 @@
     .add-payment-form{grid-template-columns:1fr;}
   }
 </style>
+  <!-- Configuration — edit config.js to update your Apps Script URL -->
+  <script src="config.js"></script>
 </head>
 <body>
 
@@ -1142,7 +1144,7 @@
 // ================================================================
 // DEPLOYMENT SETTINGS — change these to configure the app
 // ================================================================
-const APPS_SCRIPT_URL    = 'https://script.google.com/macros/s/AKfycbzIxtP8UP0wG5obpKWpeEO1_YowbT6erYJpCwXZpanIQR0XQS7j4ve63MAuLZsVucTq3g/exec'; // paste your deployed Apps Script URL here
+// APPS_SCRIPT_URL is loaded from config.js — edit that file instead of this one
 
 // MFA_ENABLED — controlled server-side in appScript.js (SECTION 2)
 // The client reads this from the server on every login attempt
@@ -4792,7 +4794,7 @@ async function refreshArchiveModal() {
   const el = document.getElementById('arch_content');
   el.innerHTML = '<div style="text-align:center;padding:20px;"><span class="spin-slow">⟳</span> Checking status…</div>';
   try {
-    const res  = await fetch(`${APPS_SCRIPT_URL}?action=archiveStatus&token=${encodeURIComponent(currentToken)}`);
+    const res  = await fetch(`${APPS_SCRIPT_URL}?action=archiveStatus&${currentSession?`session=${encodeURIComponent(currentSession.sessionToken)}`:`token=${encodeURIComponent(currentToken)}`}`);
     const data = await res.json();
     if (data.error) { el.innerHTML = `<p style="color:var(--deep-red);">⚠ ${escHtml(data.error)}</p>`; return; }
     archiveState = data;
@@ -4899,7 +4901,7 @@ async function initiateArchive() {
   if (!confirm(`Archive FY ${fy}?\n\nThis will export all data to Excel and clear the live sheets.\nThis action requires ${ARCHIVE_APPROVERS_REQUIRED_CLIENT} other admin(s) to approve.`)) return;
   document.getElementById('arch_content').innerHTML = '<div style="text-align:center;padding:20px;"><span class="spin-slow">⟳</span> Sending request…</div>';
   try {
-    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveInitiate', token:currentToken, fy }) });
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveInitiate', session:currentSession?.sessionToken, token:currentToken, fy }) });
     const data = await res.json();
     if (data.error) {
       const msg = data.message || data.error;
@@ -4915,7 +4917,7 @@ async function initiateArchive() {
 async function approveArchive() {
   document.getElementById('arch_content').innerHTML = '<div style="text-align:center;padding:20px;"><span class="spin-slow">⟳</span> Approving…</div>';
   try {
-    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveApprove', token:currentToken }) });
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveApprove', session:currentSession?.sessionToken, token:currentToken }) });
     const data = await res.json();
     if (data.error) {
       const msg = data.message || data.error;
@@ -4937,7 +4939,7 @@ async function approveArchive() {
 async function rejectArchive() {
   if (!confirm('Reject this archive request?')) return;
   try {
-    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveReject', token:currentToken }) });
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveReject', session:currentSession?.sessionToken, token:currentToken }) });
     const data = await res.json();
     if (data.error) { showToast('⚠ ' + data.error, '#B5281C'); return; }
     showToast('Archive request rejected.');
@@ -4948,7 +4950,7 @@ async function rejectArchive() {
 async function cancelArchive() {
   if (!confirm('Cancel this archive request?')) return;
   try {
-    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveCancel', token:currentToken }) });
+    const res  = await rateLimitedFetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'archiveCancel', session:currentSession?.sessionToken, token:currentToken }) });
     const data = await res.json();
     if (data.error) { showToast('⚠ ' + data.error, '#B5281C'); return; }
     showToast('Archive request cancelled.');
