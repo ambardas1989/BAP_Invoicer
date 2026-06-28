@@ -2023,31 +2023,32 @@ async function initConnection() {
     if (currentRole === 'readOnly') loadReports();
 
     // Re-validate role from server — role may have changed since session was created
-    // Uses dedicated refreshRole action which accepts session tokens (whoAmI only accepts token=)
     try {
       const sp = `session=${encodeURIComponent(stored.sessionToken)}`;
       const rv = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=refreshRole&${sp}`);
       const rd = await rv.json();
+      console.log('[BAP] refreshRole response:', JSON.stringify(rd));
       if (!rd.error && rd.role !== undefined) {
         const roleChanged = rd.role !== currentRole;
+        console.log('[BAP] role: cached=' + currentRole + ' server=' + rd.role + ' changed=' + roleChanged);
         currentIsAdmin      = rd.isAdmin      || false;
         currentIsSuperAdmin = rd.isSuperAdmin || false;
         currentRole         = rd.role         || currentRole;
-        // Update stored session with fresh role
         stored.isAdmin      = currentIsAdmin;
         stored.isSuperAdmin = currentIsSuperAdmin;
         stored.role         = currentRole;
         sessionStorage.setItem('bapSession', JSON.stringify(stored));
         if (roleChanged) {
-          // Role changed — re-apply UI and reload if needed
           const _rl1 = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
           setStatus('ok', 'Connected', `· ${currentDisplayName}${_rl1}`);
           applyRoleUI();
           if (currentRole === 'readOnly') loadReports();
-          else switchType('sponsor'); // restore to default tab if upgraded from readOnly
+          else switchType('sponsor');
         }
+      } else {
+        console.log('[BAP] refreshRole error or no role:', JSON.stringify(rd));
       }
-    } catch(e) { /* server unreachable — keep cached role */ }
+    } catch(e) { console.log('[BAP] refreshRole exception:', e.message); }
 
     try {
       const r = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=nextNumber&session=${encodeURIComponent(stored.sessionToken)}`);
