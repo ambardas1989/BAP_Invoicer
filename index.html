@@ -389,7 +389,11 @@
     </div>
     <div class="form-row" id="sp_customRow" style="display:none;">
       <div class="form-group"><label>Custom Package Name</label><input type="text" id="sp_customName" placeholder="e.g. Presenting Sponsor"></div>
-      <div class="form-group"><label>Custom Amount ($)</label><input type="number" id="sp_customAmt" placeholder="0" oninput="updateSpCustomDisplay()"></div>
+      <div class="form-group">
+        <label>Custom Amount ($) <span style="color:var(--deep-red)">*</span></label>
+        <input type="number" id="sp_customAmt" placeholder="Enter amount" oninput="updateSpCustomDisplay();validateCustomAmt()">
+        <div id="sp_customAmtErr" style="display:none;color:var(--deep-red);font-size:11px;margin-top:3px;">Amount is required for custom package</div>
+      </div>
     </div>
     <div class="benefits-panel" id="sp_benefitsPanel">
       <div class="bp-title">📋 Included Benefits — uncheck to hide from invoice</div>
@@ -2398,6 +2402,7 @@ function updateSpCustomDisplay(){
   const amt=parseFloat(document.getElementById('sp_customAmt').value)||0;
   document.getElementById('sp_customAmtDisplay').innerHTML=`$${amt.toLocaleString()} <span>/ custom</span>`;
   document.getElementById('sp_pkgAmt').value=amt;
+  validateCustomAmt();
   updateSpCalc();
 }
 // ── Multi-booth management ────────────────────────────────────────────────────
@@ -2660,6 +2665,17 @@ function getCheckedDeliverables(){const items=[];document.querySelectorAll('#ven
 // UTILS
 // ================================================================
 // ── Real-time date validation ─────────────────────────────────────────────────
+function validateCustomAmt() {
+  const el  = document.getElementById('sp_customAmt');
+  const err = document.getElementById('sp_customAmtErr');
+  const pkg = document.querySelector('#sponsorForm .package-card.selected');
+  const isCustom = pkg && (pkg.getAttribute('onclick')||'').includes('CUSTOM');
+  if (!el || !err || !isCustom) return;
+  const invalid = !el.value || parseFloat(el.value) <= 0;
+  err.style.display    = invalid ? '' : 'none';
+  el.style.borderColor = invalid ? 'var(--deep-red)' : '';
+}
+
 function validateDates(prefix) {
   const isVn     = prefix === 'vn';
   const startEl  = document.getElementById(prefix + '_startDate');
@@ -2710,6 +2726,9 @@ function markMandatory(id) {
 function initMandatoryFields() {
   // Sponsor
   ['sp_billTo','sp_contactEmail','sp_startDate','sp_endDate','sp_dueDate'].forEach(markMandatory);
+  // Custom amount — validate on blur too
+  const _custAmt = document.getElementById('sp_customAmt');
+  if (_custAmt) _custAmt.addEventListener('blur', validateCustomAmt);
   // Vendor
   ['vn_billTo','vn_contactEmail','vn_startDate','vn_endDate','vn_dueDate'].forEach(markMandatory);
 }
@@ -3350,6 +3369,10 @@ function resetForm(type){
     document.getElementById('sp_boothFields').style.display = 'none';
     document.getElementById('sp_boothList').innerHTML        = '';
     _boothCounter = 0;
+    const _boothErr = document.getElementById('sp_boothError');
+    if (_boothErr) { _boothErr.style.display = 'none'; _boothErr.textContent = ''; }
+    document.getElementById('sp_displayBoothTotal').textContent = '$0.00';
+    document.getElementById('sp_displaySponsTotal').textContent = '$0.00';
     const _spOvr2 = document.getElementById('sp_invOverride');
     if (_spOvr2) { _spOvr2.checked = false; toggleInvOverride('sp'); }
     document.getElementById('sp_invDate').valueAsDate=new Date();
@@ -3363,6 +3386,16 @@ function resetForm(type){
     document.getElementById('sp_eventSelect').value='Durga Puja';
     document.getElementById('sp_eventCustom').style.display='none';
     document.getElementById('sp_eventCustom').value='';
+    // Reset custom package fields
+    const _custAmtEl = document.getElementById('sp_customAmt');
+    const _custNameEl = document.getElementById('sp_customPkgName');
+    const _custErrEl  = document.getElementById('sp_customAmtErr');
+    if (_custAmtEl)  { _custAmtEl.value = ''; _custAmtEl.style.borderColor = ''; }
+    if (_custNameEl) { _custNameEl.value = ''; }
+    if (_custErrEl)  { _custErrEl.style.display = 'none'; }
+    const _custRow = document.getElementById('sp_customRow');
+    if (_custRow) _custRow.style.display = 'none';
+    // Reset to Gold package (index 2)
     selectPackage(document.querySelectorAll('#sponsorForm .package-card')[2],'GOLD',5000);
 // Set org defaults from CFG
 document.getElementById('sp_taxId').value = CFG.orgTaxId;
