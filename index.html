@@ -1773,8 +1773,9 @@ function rateLimitedFetch(url, opts, minGapMs = 800) {
 
 function handleSwitchUser() {
   if (currentSession || currentToken) {
-    // Already logged in — open new tab for fresh login with role refresh
-    window.open(window.location.href, '_blank');
+    // Already logged in — open new tab with ?login=1 to force login modal
+    const url = window.location.href.split('?')[0] + '?login=1';
+    window.open(url, '_blank');
   } else {
     showTokenModal(false);
   }
@@ -2081,6 +2082,12 @@ async function initConnection() {
   if (!hasBackend()) {
     setStatus('', 'Google Sheets not connected — invoice numbers generated locally');
     generateLocalNumbers();
+    return;
+  }
+
+  // If ?login=1 param — force login modal (used by Switch user new tab)
+  if (new URLSearchParams(window.location.search).get('login') === '1') {
+    showTokenModal(false);
     return;
   }
 
