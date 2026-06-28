@@ -314,7 +314,15 @@
   <div class="card">
     <div class="card-title">Invoice Details</div>
     <div class="form-row three">
-      <div class="form-group"><label>Invoice Number</label><input type="text" id="sp_invNumber" value="BAP-SPN-2025-26-XXXX" style="background:#EEF2FF;color:#2A5BC8;font-weight:600;"></div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;">Invoice Number
+          <label style="font-size:11px;font-weight:400;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
+            <input type="checkbox" id="sp_invOverride" onchange="toggleInvOverride('sp')" style="cursor:pointer;"> Override
+          </label>
+        </label>
+        <input type="text" id="sp_invNumber" value="BAP-SPN-2025-26-XXXX" readonly
+          style="background:#EEF2FF;color:#2A5BC8;font-weight:600;cursor:default;">
+      </div>
       <div class="form-group"><label>Invoice Date</label><input type="date" id="sp_invDate"></div>
       <div class="form-group"><label>Tax ID</label><input type="text" id="sp_taxId"></div>
     </div>
@@ -451,7 +459,15 @@
   <div class="card">
     <div class="card-title">Invoice Details</div>
     <div class="form-row three">
-      <div class="form-group"><label>Invoice Number</label><input type="text" id="vn_invNumber" value="BAP-VNDR-2025-26-XXXX" style="background:#EEF2FF;color:#2A5BC8;font-weight:600;"></div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;">Invoice Number
+          <label style="font-size:11px;font-weight:400;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
+            <input type="checkbox" id="vn_invOverride" onchange="toggleInvOverride('vn')" style="cursor:pointer;"> Override
+          </label>
+        </label>
+        <input type="text" id="vn_invNumber" value="BAP-VNDR-2025-26-XXXX" readonly
+          style="background:#EEF2FF;color:#2A5BC8;font-weight:600;cursor:default;">
+      </div>
       <div class="form-group"><label>Invoice Date</label><input type="date" id="vn_invDate"></div>
       <div class="form-group"><label>Tax ID</label><input type="text" id="vn_taxId"></div>
     </div>
@@ -3258,6 +3274,8 @@ function resetForm(type){
     document.getElementById('sp_boothFields').style.display = 'none';
     document.getElementById('sp_boothList').innerHTML        = '';
     _boothCounter = 0;
+    const _spOvr2 = document.getElementById('sp_invOverride');
+    if (_spOvr2) { _spOvr2.checked = false; toggleInvOverride('sp'); }
     document.getElementById('sp_invDate').valueAsDate=new Date();
     const d=new Date();d.setDate(d.getDate()+30);document.getElementById('sp_dueDate').valueAsDate=d;
     const now=new Date();
@@ -3285,6 +3303,8 @@ document.getElementById('vn_taxId').value = CFG.orgTaxId;
     document.getElementById('vn_boothSize').value='';
     document.getElementById('vn_boothSizeCustom').style.display='none';
     document.getElementById('vn_boothAmt').value='0';
+    const _vnOvr2 = document.getElementById('vn_invOverride');
+    if (_vnOvr2) { _vnOvr2.checked = false; toggleInvOverride('vn'); }
     document.getElementById('vn_invDate').valueAsDate=new Date();
     const _vd=new Date(); const _vdStr=_vd.toISOString().slice(0,10);
     document.getElementById('vn_startDate').value=_vdStr+'T00:00';
@@ -5239,6 +5259,9 @@ function validateDonForm() {
 
 // ── PDF generation ────────────────────────────────────────────
 async function generateDonPDF(emailMode) {
+  // Check invoice number uniqueness if override is active
+  const _donValid = await validateInvNumberIfOverride('don');
+  if (!_donValid) return;
   const d = validateDonForm();
   if (!d) return null;
 
