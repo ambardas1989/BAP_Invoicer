@@ -2650,6 +2650,19 @@ async function showPreview(type){
   if (!emailVal)               errors.push('Contact email is required');
   else if (!emailValid)        errors.push('Contact email is not valid');
   if (amt <= 0)                errors.push('Amount must be greater than $0');
+  // Date validations
+  const _invDateEl   = document.getElementById(isV?'vn_invoiceDate':'sp_invDate');
+  const _startDateEl = document.getElementById(isV?'vn_startDate':'sp_startDate');
+  const _endDateEl   = document.getElementById(isV?'vn_endDate':'sp_endDate');
+  const _dueDateEl   = document.getElementById(isV?'vn_dueDate':'sp_dueDate');
+  const _invDate   = _invDateEl   ? new Date(_invDateEl.value)   : null;
+  const _startDate = _startDateEl ? new Date(_startDateEl.value) : null;
+  const _endDate   = _endDateEl   ? new Date(_endDateEl.value)   : null;
+  const _dueDate   = _dueDateEl   ? new Date(_dueDateEl.value)   : null;
+  if (_startDate && _endDate && _endDate <= _startDate)
+    errors.push('End date must be after start date');
+  if (_dueDate && _invDate && _dueDate < _invDate)
+    errors.push('Payment due date cannot be before invoice date');
   if (!isV) {
     const boothErrEl = document.getElementById('sp_boothError');
     if (boothErrEl && boothErrEl.style.display !== 'none' && boothErrEl.textContent)
@@ -2678,8 +2691,8 @@ function logoImgTag(size){
   if(ok)return`<img src="${el.src}" style="width:${size}px;height:${size}px;object-fit:contain;" alt="BAP">`;
   return`<div style="width:${size}px;height:${size}px;background:#E8732A;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:${Math.round(size*0.35)}px;color:white;font-family:'Playfair Display',serif;">BP</div>`;
 }
-function invHeader(num,date,taxId,dueDate){
-  return`<div class="inv-header"><div class="inv-logo-area">${logoImgTag(56)}<h2 style="margin-top:10px;">BAY AREA PRABASI</h2><p>PO Box: 3613, Fremont, CA 94539</p><p>http://www.prabasi.org/</p></div><div class="inv-meta"><div class="inv-label">INVOICE</div><table><tr><td>Date:</td><td>${date}</td></tr><tr><td>Invoice #:</td><td>${num}</td></tr><tr><td>Tax ID:</td><td>${taxId}</td></tr>${dueDate?`<tr><td>Payment Due By:</td><td><strong style="color:#B5281C;">${dueDate}</strong></td></tr>`:''}</table></div></div>`;
+function invHeader(num,date,taxId,dueDate,fy){
+  return`<div class="inv-header"><div class="inv-logo-area">${logoImgTag(56)}<h2 style="margin-top:10px;">BAY AREA PRABASI</h2><p>PO Box: 3613, Fremont, CA 94539</p><p>http://www.prabasi.org/</p></div><div class="inv-meta"><div class="inv-label">INVOICE</div><table><tr><td>Date:</td><td>${date}</td></tr><tr><td>Invoice #:</td><td>${num}</td></tr>${fy?`<tr><td>Fiscal Year:</td><td><strong>${fy}</strong></td></tr>`:''}<tr><td>Tax ID:</td><td>${taxId}</td></tr>${dueDate?`<tr><td>Payment Due By:</td><td><strong style="color:#B5281C;">${dueDate}</strong></td></tr>`:''}</table></div></div>`;
 }
 function benefitsTable(benefitsText) {
   if (!benefitsText) return '';
@@ -2716,6 +2729,7 @@ function buildSpHTML(){
   const date=fmtDate(document.getElementById('sp_invDate').value);
   const taxId=document.getElementById('sp_taxId').value;
   const dueDate=fmtDate(document.getElementById('sp_dueDate').value);
+  const spFY=getFiscalYear(document.getElementById('sp_startDate').value||document.getElementById('sp_invDate').value||null);
   const billTo=document.getElementById('sp_billTo').value||'___________________________________';
   const sponsorType=document.getElementById('sp_sponsorType').value;
   const spEventName=getSpEventName();
@@ -2747,7 +2761,7 @@ function buildSpHTML(){
   const splitRows = hasBooth && booths.length > 0 ? `
     <tr style="background:#F5F5F5;"><td style="color:#666;padding-left:12px;">Sponsorship Portion</td><td style="color:#666;">${fmt(sponsAmt)}</td></tr>
     <tr style="background:#F0F0F0;font-weight:600;"><td>Total Commitment</td><td>${fmt(totalAmt)}</td></tr>` : '';
-  return`<div style="margin-bottom:6px;"><span class="inv-type-badge badge-sponsor">Sponsorship Invoice</span></div>${invHeader(num,date,taxId,dueDate)}<div class="inv-bill-to"><div class="label">Bill To</div><div class="value">${billTo}</div></div><table class="inv-table"><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody><tr><td><strong>${getSpPkgName()}</strong><div class="pkg-detail">${spDescLine}</div>${benefitsTable(benefits)}</td><td>${hasBooth&&booths.length>0?fmt(sponsAmt):fmt(amt)}</td></tr>${boothRows}${splitRows}${notes?`<tr><td colspan="2" style="padding:8px 0 0;"><div style="background:#FFF8EE;border-left:3px solid #E8732A;border-radius:0 4px 4px 0;padding:8px 10px;"><div style="font-size:10px;font-weight:600;color:#E8732A;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Additional Notes / Custom Offerings</div><div style="font-size:12px;color:#1A2B4A;text-align:left;">${escHtml(notes)}</div></div></td></tr>`:''}</tbody></table>${totalsBlock(totalAmt,adv,disc,due,'Total Commitment')}${payBlock(num)}${footerBlock()}`;
+  return`<div style="margin-bottom:6px;"><span class="inv-type-badge badge-sponsor">Sponsorship Invoice</span></div>${invHeader(num,date,taxId,dueDate,spFY)}<div class="inv-bill-to"><div class="label">Bill To</div><div class="value">${billTo}</div></div><table class="inv-table"><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody><tr><td><strong>${getSpPkgName()}</strong><div class="pkg-detail">${spDescLine}</div>${benefitsTable(benefits)}</td><td>${hasBooth&&booths.length>0?fmt(sponsAmt):fmt(amt)}</td></tr>${boothRows}${splitRows}${notes?`<tr><td colspan="2" style="padding:8px 0 0;"><div style="background:#FFF8EE;border-left:3px solid #E8732A;border-radius:0 4px 4px 0;padding:8px 10px;"><div style="font-size:10px;font-weight:600;color:#E8732A;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Additional Notes / Custom Offerings</div><div style="font-size:12px;color:#1A2B4A;text-align:left;">${escHtml(notes)}</div></div></td></tr>`:''}</tbody></table>${totalsBlock(totalAmt,adv,disc,due,'Total Commitment')}${payBlock(num)}${footerBlock()}`;
 }
 
 function buildVnHTML(){
@@ -2777,7 +2791,8 @@ function buildVnHTML(){
   if(parseInt(parking))d.push(`Parking Passes: ${parking}`);
   checked.forEach(c=>d.push(c)); if(misc)d.push(misc);
   const eventLine=[eventName,venue,period].filter(Boolean).join(' · ');
-  return`<div style="margin-bottom:6px;"><span class="inv-type-badge badge-vendor">Vendor / Booth Invoice</span></div>${invHeader(num,date,taxId,dueDate)}<div class="inv-bill-to"><div class="label">Bill To</div><div class="value">${billTo}</div></div><table class="inv-table"><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody><tr><td><strong>${getVnBoothName()}</strong>${eventLine?`<div class="pkg-detail">${eventLine}</div>`:''}${benefitsTable(d.join(' · '))}</td><td>${fmt(amt)}</td></tr>${notes?`<tr><td colspan="2" style="padding:8px 0 0;"><div style="background:#FFF8EE;border-left:3px solid #E8732A;border-radius:0 4px 4px 0;padding:8px 10px;"><div style="font-size:10px;font-weight:600;color:#E8732A;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Additional Notes / Custom Offerings</div><div style="font-size:12px;color:#1A2B4A;text-align:left;">${escHtml(notes)}</div></div></td></tr>`:''}</tbody></table>${totalsBlock(amt,adv,disc,due,'Booth Total')}${payBlock(num)}${footerBlock()}`;
+  const vnFY=getFiscalYear(document.getElementById('vn_startDate').value||document.getElementById('vn_invoiceDate').value||null);
+  return`<div style="margin-bottom:6px;"><span class="inv-type-badge badge-vendor">Vendor / Booth Invoice</span></div>${invHeader(num,date,taxId,dueDate,vnFY)}<div class="inv-bill-to"><div class="label">Bill To</div><div class="value">${billTo}</div></div><table class="inv-table"><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody><tr><td><strong>${getVnBoothName()}</strong>${eventLine?`<div class="pkg-detail">${eventLine}</div>`:''}${benefitsTable(d.join(' · '))}</td><td>${fmt(amt)}</td></tr>${notes?`<tr><td colspan="2" style="padding:8px 0 0;"><div style="background:#FFF8EE;border-left:3px solid #E8732A;border-radius:0 4px 4px 0;padding:8px 10px;"><div style="font-size:10px;font-weight:600;color:#E8732A;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Additional Notes / Custom Offerings</div><div style="font-size:12px;color:#1A2B4A;text-align:left;">${escHtml(notes)}</div></div></td></tr>`:''}</tbody></table>${totalsBlock(amt,adv,disc,due,'Booth Total')}${payBlock(num)}${footerBlock()}`;
 }
 
 // ================================================================
@@ -3146,7 +3161,11 @@ async function _generatePDF(type){
     miscNotes:     document.getElementById('vn_misc').value,
     notes,
     bapPoc:        document.getElementById('vn_bapPoc').value,
-    fiscalYear:    getFiscalYear(document.getElementById('vn_startDate').value||null),
+    fiscalYear:    getFiscalYear(
+        document.getElementById('vn_startDate').value ||
+        document.getElementById('vn_invoiceDate').value ||
+        null
+      ),
     pdfBase64
   } : {
     invoiceDate:     document.getElementById('sp_invDate').value,
@@ -3165,7 +3184,11 @@ async function _generatePDF(type){
     activeBenefits:  benefitsText,
     notes,
     bapPoc:          document.getElementById('sp_bapPoc').value,
-    fiscalYear:      getFiscalYear(document.getElementById('sp_startDate').value||null),
+    fiscalYear:      getFiscalYear(
+        document.getElementById('sp_startDate').value ||  // sponsorship start date (preferred)
+        document.getElementById('sp_invoiceDate').value || // invoice date fallback
+        null
+      ),
     pdfBase64,
     // Booth allocation — array of booth objects
     // Package IS total commitment; booth is carved out; sponsorship = pkg - booth
