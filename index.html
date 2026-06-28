@@ -1443,6 +1443,10 @@ function applyRoleUI() {
     if (allPanels.retrieve) allPanels.retrieve.style.display = 'none';
     if (allPanels.reports)  allPanels.reports.style.display  = '';
   }
+
+  // Always sync delete button visibility with current role
+  const delBtn = document.getElementById('rt_deleteBtn');
+  if (delBtn) delBtn.style.display = currentIsSuperAdmin ? '' : 'none';
 }
 
 // Updates token modal UI after server confirms MFA is required
@@ -2004,18 +2008,46 @@ async function initConnection() {
   // ── Case 1: valid session in sessionStorage (page reload, tab restore) ──
   const stored = loadStoredSession();
   if (stored) {
-    currentSession     = stored;
-    currentDisplayName = stored.displayName;
+    // Restore session from storage first (fast path — shows UI immediately)
+    currentSession      = stored;
+    currentDisplayName  = stored.displayName;
     currentIsAdmin      = stored.isAdmin;
     currentIsSuperAdmin = stored.isSuperAdmin || false;
     currentRole         = stored.role || (stored.isAdmin ? 'admin' : 'readOnly');
     MFA_ENABLED_CLIENT  = true;
     if (stored.maskDonorNames !== undefined) CFG.maskDonorName = stored.maskDonorNames;
     CFG.defaultCcEmail = stored.defaultCc || '';
-    const _rl = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
-    setStatus('ok', 'Connected', `· ${currentDisplayName}${_rl}`);
+    const _rl0 = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
+    setStatus('ok', 'Connected', `· ${currentDisplayName}${_rl0}`);
     applyRoleUI();
     if (currentRole === 'readOnly') loadReports();
+
+    // Now re-validate role from server — role may have changed since session was created
+    try {
+      const sp = `session=${encodeURIComponent(stored.sessionToken)}`;
+      const rv = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=whoAmI&${sp}`);
+      const rd = await rv.json();
+      if (!rd.error && rd.role !== undefined) {
+        const roleChanged = rd.role !== currentRole;
+        currentIsAdmin      = rd.isAdmin      || false;
+        currentIsSuperAdmin = rd.isSuperAdmin || false;
+        currentRole         = rd.role         || currentRole;
+        // Update stored session with fresh role
+        stored.isAdmin      = currentIsAdmin;
+        stored.isSuperAdmin = currentIsSuperAdmin;
+        stored.role         = currentRole;
+        sessionStorage.setItem('bapSession', JSON.stringify(stored));
+        if (roleChanged) {
+          // Role changed — re-apply UI and reload if needed
+          const _rl1 = currentRole==='superadmin'?' · Super Admin':currentRole==='admin'?' · Admin':' · Read Only';
+          setStatus('ok', 'Connected', `· ${currentDisplayName}${_rl1}`);
+          applyRoleUI();
+          if (currentRole === 'readOnly') loadReports();
+          else switchType('sponsor'); // restore to default tab if upgraded from readOnly
+        }
+      }
+    } catch(e) { /* server unreachable — keep cached role */ }
+
     try {
       const r = await rateLimitedFetch(`${APPS_SCRIPT_URL}?action=nextNumber&session=${encodeURIComponent(stored.sessionToken)}`);
       const d = await r.json();
